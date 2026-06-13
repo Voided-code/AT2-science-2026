@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en-AU">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Year 8 Science Quiz</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="top">
+    <div class="top-inner">
+      <div class="brand">
+        <div>
+          <div class="t1">Elements &amp; Atoms</div>
+          <div class="t2">Year 8 Science - Random quiz</div>
+        </div>
+      </div>
+      <div class="score-chip">
+        <span class="pct" id="scorePercent">0%</span>
+        <span id="scoreLabel">0 answered</span>
+      </div>
+    </div>
+    <div class="progress-track"><div class="progress-fill" id="progFill"></div></div>
+  </header>
+
+  <main class="wrap">
+    <div class="layout-grid">
+      <section class="quiz-shell">
+        <div class="question-card" id="questionCard"></div>
+      </section>
+    </div>
+  </main>
+  <script defer src="script.js"></script>
+</body>
+</html>
