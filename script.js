@@ -17,6 +17,122 @@ function enhancePeriodicTable(){
   });
 }
 
+// AI GRADING OPTIONS (in priority order)
+
+// 1. LOCAL OLLAMA (FREE, NO INTERNET, FASTEST - optional)
+var OLLAMA_ENDPOINT = 'http://localhost:11434/api/generate'; // local Ollama endpoint
+var OLLAMA_MODEL = 'llama2';
+var ollamaAvailable = false;
+
+// 2. HUGGING FACE FREE CLOUD API (JUST WORKS, NO SETUP)
+// Using a free open-source model endpoint (rate limited but free)
+var HF_MODEL_ENDPOINT = 'https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.1';
+var hfAvailable = true; // always try unless rate limited
+
+// 3. OPENAI (optional, if you have credits)
+var OPENAI_API_KEY_PLAINTEXT = ''; // paste your OpenAI key here if you have credits
+var ENCRYPTED_OPENAI_KEY = ''; // OR paste the encrypted JSON blob here
+var apiKeyValid = false;
+
+function b64ToBuf(b64){
+  return Uint8Array.from(atob(b64), c=>c.charCodeAt(0));
+}
+
+function bufToB64(buf){
+  return btoa(String.fromCharCode.apply(null, new Uint8Array(buf)));
+}
+
+async function deriveKeyFromPass(pass){
+  const enc = new TextEncoder().encode(pass);
+  const hash = await crypto.subtle.digest('SHA-256', enc);
+  return crypto.subtle.importKey('raw', hash, {name:'AES-GCM'}, false, ['decrypt']);
+}
+
+async function decryptOpenAIKey(encJsonString, passphrase){
+  try{
+    const obj = JSON.parse(encJsonString);
+    const iv = b64ToBuf(obj.iv);
+    const tag = b64ToBuf(obj.tag);
+    const data = b64ToBuf(obj.data);
+    // concatenate data + tag for WebCrypto
+    const cipherBytes = new Uint8Array(data.length + tag.length);
+    cipherBytes.set(data, 0);
+    cipherBytes.set(tag, data.length);
+    const key = await deriveKeyFromPass(passphrase);
+    const plainBuf = await crypto.subtle.decrypt({name:'AES-GCM', iv: iv, tagLength: 128}, key, cipherBytes);
+    return new TextDecoder().decode(plainBuf);
+  }catch(e){
+    throw new Error('Decryption failed: '+e.message);
+  }
+}
+
+// Grade using local Ollama
+async function gradeWithOllama(answer, guidance){
+  const prompt = `You are a Year 8 Science teacher grading student answers.\n\nExpected guidance: ${guidance}\n\nStudent answer: ${answer}\n\nGrade this answer as either correct (1) or incorrect (0), and provide a one-sentence explanation.\nRespond ONLY with valid JSON in this exact format:\n{"score": 0 or 1, "explanation": "brief one-sentence feedback"}\n\nJSON:`;
+  
+  const res = await fetch(OLLAMA_ENDPOINT, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: OLLAMA_MODEL,
+      prompt: prompt,
+      stream: false,
+      temperature: 0,
+      num_predict: 100
+    })
+  });
+  
+  if(!res.ok){
+    throw new Error('Ollama error '+res.status);
+  }
+  
+  const data = await res.json();
+  const txt = data.response ? data.response.trim() : '';
+  try{
+    return JSON.parse(txt);
+  } catch(e){
+    return { score: 0, explanation: 'Ollama: '+txt.substring(0, 80) };
+  }
+}
+
+// Grade using OpenAI (if API key available)
+async function clientGradeWithOpenAI(answer, guidance){
+  var apiKey = null;
+  if(OPENAI_API_KEY_PLAINTEXT){
+    apiKey = OPENAI_API_KEY_PLAINTEXT;
+  } else if(ENCRYPTED_OPENAI_KEY){
+    const pass = prompt('Enter decryption passphrase to use OpenAI (not stored):');
+    if(!pass) throw new Error('No passphrase entered');
+    apiKey = await decryptOpenAIKey(ENCRYPTED_OPENAI_KEY, pass);
+  } else {
+    throw new Error('No OpenAI API key available');
+  }
+  const body = {
+    model: 'gpt-3.5-turbo',
+    messages: [
+      { role: 'system', content: 'You are a helpful grader. Return JSON: {"score":0|1, "explanation":"one-sentence"}.' },
+      { role: 'user', content: `Guidance: ${guidance}\n\nStudent answer: ${answer}\n\nReturn only valid JSON.` }
+    ],
+    max_tokens: 200,
+    temperature: 0
+  };
+  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
+    body: JSON.stringify(body)
+  });
+  if(!res.ok){
+    const errData = await res.text();
+    throw new Error('OpenAI API error '+res.status+': '+(errData.substring(0, 100)));
+  }
+  const data = await res.json();
+  if(data.error){
+    throw new Error('OpenAI error: '+(data.error.message || JSON.stringify(data.error)));
+  }
+  const txt = data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content ? data.choices[0].message.content.trim() : '';
+  try{ return JSON.parse(txt); } catch(e){ return { score:0, explanation: txt || 'API returned: '+txt.substring(0, 50) }; }
+}
+
 var questionBank = buildQuestionBank();
 var totals={answered:0,correct:0};
 var currentQuestionIndex=0;
@@ -26,236 +142,167 @@ var historyPosition=0;
 var answeredLast=false;
 var autoNextTimeout = null;
 
+// Check if Ollama is running locally
+async function checkOllamaAvailable(){
+  try {
+    const res = await fetch('http://localhost:11434/api/tags', { method: 'GET' });
+    return res.ok;
+  } catch(e) {
+    return false;
+  }
+}
+
+// Validate OpenAI API key (if using OpenAI)
+async function validateOpenAIKey(){
+  try {
+    var apiKey = OPENAI_API_KEY_PLAINTEXT || (ENCRYPTED_OPENAI_KEY ? null : null);
+    if(!apiKey) return false;
+    const res = await fetch('https://api.openai.com/v1/models', {
+      method: 'GET',
+      headers: { 'Authorization': 'Bearer ' + apiKey }
+    });
+    return res.ok;
+  } catch(e) {
+    return false;
+  }
+}
+
 function buildQuestionBank(){
   var bank=[];
 
   var matter=[
-    {question:'Which of these is an element?',choices:['Water','Air','Gold','Salt'],answer:2,explanation:'Gold is a pure element, made of only one type of atom.'},
-    {question:'A mixture is different from a compound because a mixture:',choices:['Has only one atom type','Can be separated physically','Has atoms chemically bonded','Always contains water'],answer:1,explanation:'A mixture can be separated physically because its parts are not chemically joined.'},
-    {question:'The formula H2O stands for:',choices:['Hydrogen gas','Water','Hydrogen peroxide','Oxygen gas'],answer:1,explanation:'H2O is the chemical formula for water, a compound made of hydrogen and oxygen.'},
-    {question:'Which formula shows an element molecule?',choices:['CO2','O2','NaCl','H2O'],answer:1,explanation:'O2 has only oxygen atoms, so it is an element molecule.'},
-    {question:'How many atoms are in one molecule of CO2?',choices:['1','2','3','4'],answer:2,explanation:'CO2 contains one carbon atom and two oxygen atoms, for three in total.'},
-    {question:'Which of these is a compound?',choices:['Gold','Oxygen','Water','Argon'],answer:2,explanation:'Water is a compound made of hydrogen and oxygen atoms chemically bonded.'},
-    {question:'Which sample is a mixture?',choices:['Salt water','Oxygen gas','Diamond','Neon'],answer:0,explanation:'Salt water is a mixture of salt and water, not a pure substance.'},
-    {question:'Which of these is a pure substance?',choices:['Air','Steel','Sodium chloride','Trail mix'],answer:2,explanation:'Sodium chloride is a compound with a fixed chemical formula.'},
-    {question:'What is a key property of a mixture?',choices:['Fixed composition','Components not chemically joined','Always a solid','Contains only one element'],answer:1,explanation:'A mixture is made of components that are not chemically bonded.'},
-    {question:'Which change is physical?',choices:['Melting ice','Burning paper','Rusting iron','Baking bread'],answer:0,explanation:'Melting ice changes state but does not create a new substance.'},
-    {question:'Which change is chemical?',choices:['Dissolving sugar','Melting wax','Burning wood','Freezing water'],answer:2,explanation:'Burning wood creates new substances and is therefore chemical.'},
-    {question:'Which substance is an element?',choices:['Gold','Water','Carbon dioxide','Salt'],answer:0,explanation:'Gold is a single element made of only gold atoms.'},
-    {question:'Which substance is a compound?',choices:['Oxygen','Iron','Carbon dioxide','Helium'],answer:2,explanation:'Carbon dioxide contains carbon and oxygen atoms bonded together.'},
+    {question:'Sam dissolved table salt in water and then evaporated the water. Which statement best describes the original mixture?',choices:['It was a heterogeneous mixture','It was a homogeneous mixture','It was a pure element','It was a compound'],answer:1,explanation:'Salt dissolved evenly in water, making a homogeneous mixture.'},
+    {question:'A student says that a sample containing only one type of atom is a compound. What is the correct classification?',choices:['Element','Mixture','Solution','Alloy'],answer:0,explanation:'A substance made of only one kind of atom is an element.'},
+    {question:'A bottle is labelled H2O. What does this formula represent?',choices:['Water','Hydrogen gas','Oxygen gas','Hydrogen peroxide'],answer:0,explanation:'H2O is the chemical formula for water, a compound of hydrogen and oxygen.'},
+    {question:'One sample is made of only O2 molecules. How should this sample be described?',choices:['Element','Compound','Mixture','Alloy'],answer:0,explanation:'O2 is comprised of only oxygen atoms, so it is an element.'},
+    {question:'A student places crushed rock and iron filings into water and then uses a magnet to separate them. This is an example of:',choices:['A heterogeneous mixture','A homogeneous mixture','A compound','A pure substance'],answer:0,explanation:'The parts remain physically separate, so it is a heterogeneous mixture.'},
+    {question:'Which description fits gold metal?',choices:['Element','Compound','Mixture','Solution'],answer:0,explanation:'Gold is an element made of only gold atoms.'},
+    {question:'Which description fits sodium chloride (table salt)?',choices:['Compound','Element','Mixture','Pure gas'],answer:0,explanation:'Sodium chloride is a compound made from sodium and chlorine atoms.'},
+    {question:'When sugar dissolves in water and can be recovered by evaporation, the process is:',choices:['Physical change','Chemical change','Nuclear change','Biological change'],answer:0,explanation:'The sugar remains the same substance, so the change is physical.'},
+    {question:'Paper burns and leaves ash behind. This is best described as:',choices:['Chemical change','Physical change','Reversible change','Dissolution'],answer:0,explanation:'Burning paper produces new substances, so it is a chemical change.'},
+    {question:'A clear, uniform vinegar solution is an example of a:',choices:['Homogeneous mixture','Heterogeneous mixture','Element','Compound'],answer:0,explanation:'Vinegar is evenly mixed, making it a homogeneous mixture.'},
     {question:'Which of these is not matter?',choices:['Heat','Water','Air','Sand'],answer:0,explanation:'Heat is energy, not matter.'},
-    {question:'Which of these can be separated by physical means?',choices:['Sugar water','Sodium chloride','Carbon dioxide','Oxygen gas'],answer:0,explanation:'Sugar water is a mixture that can be separated physically.'},
-    {question:'Which is a heterogeneous mixture?',choices:['Soil','Sugar solution','Oxygen gas','Salt'],answer:0,explanation:'Soil is a heterogeneous mixture with visibly different components.'},
-    {question:'Which is a homogeneous mixture?',choices:['Vinegar','Sand','Granite','Oil and water'],answer:0,explanation:'Vinegar is a uniform mixture of acetic acid and water.'},
-    {question:'Which element is a gas at room temperature?',choices:['Oxygen','Iron','Sodium','Copper'],answer:0,explanation:'Oxygen is a gas at room temperature.'},
-    {question:'Which mixture can usually be separated by filtration?',choices:['Sand and water','Salt water','Oxygen and nitrogen','Carbon dioxide'],answer:0,explanation:'Sand and water is a suspension that can be filtered.'},
-    {question:'Which is true for a compound?',choices:['It has a fixed ratio of elements','It is a mixture','It is always gaseous','It contains only one atom'],answer:0,explanation:'Compounds have elements combined in fixed ratios.'},
-    {question:'Which is true for an element?',choices:['It cannot be broken down by chemical means','It is made of two elements','It is always liquid','It contains molecules only'],answer:0,explanation:'Elements are substances that cannot be chemically decomposed into simpler substances.'},
-    {question:'Which of these is made of atoms of two different elements?',choices:['Water','Copper','Gold','Hydrogen'],answer:0,explanation:'Water contains hydrogen and oxygen atoms.'},
+    {question:'Which sample can be separated by physical methods without changing the substances?',choices:['Salt water','Carbon dioxide','Gold','Helium'],answer:0,explanation:'Salt water is a mixture that can be separated physically.'},
+    {question:'Which term describes a material made from two or more metals combined?',choices:['Alloy','Compound','Element','Gas'],answer:0,explanation:'An alloy is a mixture of metals.'},
     {question:'Which of these is a chemical formula?',choices:['CO2','Bronze','Air','Steel'],answer:0,explanation:'CO2 is the chemical formula for carbon dioxide.'},
-    {question:'Which is not a compound?',choices:['O2','H2O','CO2','NaCl'],answer:0,explanation:'O2 is a molecule of an element, not a compound.'},
-    {question:'Which is a physical property?',choices:['Colour','Reactivity','Burning','Rusting'],answer:0,explanation:'Colour is a physical property of a substance.'},
-    {question:'Which is a chemical property?',choices:['Flammability','Melting point','Hardness','Colour'],answer:0,explanation:'Flammability describes how a substance reacts chemically with oxygen.'},
-    {question:'Which process separates a mixture by particle size?',choices:['Filtration','Distillation','Evaporation','Combustion'],answer:0,explanation:'Filtration separates components based on particle size.'},
-    {question:'Which process separates a compound into elements?',choices:['Electrolysis','Filtration','Decanting','Sieving'],answer:0,explanation:'Electrolysis uses electricity to break compounds into elements.'},
-    {question:'Which of these is not a mixture?',choices:['Air','Salt','Fruit salad','Petrol'],answer:1,explanation:'Salt is a compound, not a mixture.'},
-    {question:'Which of these is an alloy?',choices:['Bronze','Water','Oxygen','Diamond'],answer:0,explanation:'Bronze is an alloy made from copper and tin.'}
+    {question:'Which is a physical property of a substance?',choices:['Colour','Reactivity','Flammability','Oxidation state'],answer:0,explanation:'Colour is a physical property that can be observed without changing the substance.'},
+    {question:'Which is a chemical property?',choices:['Flammability','Melting point','Density','Colour'],answer:0,explanation:'Flammability describes how a substance reacts chemically.'}
   ];
   matter.forEach(function(item){ bank.push({topic:'Matter',outcomes:['SC4-PRT-01'],type:'mcq',question:item.question,choices:item.choices,answer:item.answer,explanation:item.explanation});});
 
   var atomic=[
-    {question:'Which particle has a negative charge?',choices:['Proton','Neutron','Electron','Nucleus'],answer:2,explanation:'Electrons are negatively charged.'},
-    {question:'The atomic number of an element tells us the number of:',choices:['Neutrons','Protons','Electrons in any ion','Molecules'],answer:1,explanation:'The atomic number equals the number of protons.'},
-    {question:'An atom is neutral when it has:',choices:['More protons than electrons','More electrons than protons','Equal protons and electrons','Only neutrons'],answer:2,explanation:'Equal protons and electrons make the atom neutral.'},
-    {question:'An atom with electron arrangement 2, 8, 1 is most likely:',choices:['Neon','Sodium','Chlorine','Carbon'],answer:1,explanation:'Sodium has 11 electrons, arranged 2, 8, 1.'},
-    {question:'Which particle is found in the nucleus and has positive charge?',choices:['Proton','Electron','Photon','Neutron'],answer:0,explanation:'Protons are positively charged and located in the nucleus.'},
-    {question:'Which particle has no charge?',choices:['Photon','Atom','Neutron','Electron'],answer:2,explanation:'Neutrons carry no electric charge.'},
-    {question:'Electrons occupy regions called:',choices:['Shells','Nucleus','Protons','Orbits'],answer:0,explanation:'Electrons occupy shells around the nucleus.'},
-    {question:'The nucleus contains:',choices:['Protons and neutrons','Electrons and protons','Electrons and neutrons','Only electrons'],answer:0,explanation:'The nucleus contains protons and neutrons.'},
-    {question:'Which particle determines an atom’s chemical behaviour?',choices:['Proton','Neutron','Electron','Atom'],answer:2,explanation:'Electrons determine chemical reactions and bonding.'},
-    {question:'A neutral helium atom has 2 protons and:',choices:['2 neutrons','2 electrons','1 electron','3 electrons'],answer:1,explanation:'A neutral helium atom also has two electrons.'},
-    {question:'Which particle has about the same mass as a proton?',choices:['Neutron','Electron','Photon','Molecule'],answer:0,explanation:'Neutrons and protons have similar mass.'},
-    {question:'The number of electrons in a neutral atom equals:',choices:['Number of protons','Number of neutrons','Number of atoms','Number of molecules'],answer:0,explanation:'Neutral atoms have equal numbers of protons and electrons.'},
-    {question:'Which of these is an isotope of carbon?',choices:['Carbon-13','Carbon dioxide','Carbon monoxide','Carbon fibre'],answer:0,explanation:'Carbon-13 is an isotope of the element carbon.'},
-    {question:'Which particle would you remove to make a positive ion?',choices:['Proton','Neutron','Electron','Nucleus'],answer:2,explanation:'Removing an electron gives a positive ion.'},
-    {question:'Which particle is most likely to be shared between atoms in a bond?',choices:['Proton','Neutron','Electron','Photon'],answer:2,explanation:'Electrons are shared in covalent bonds.'},
-    {question:'Which scientist discovered electrons?',choices:['Rutherford','Dalton','Thomson','Bohr'],answer:2,explanation:'J.J. Thomson discovered the electron.'},
-    {question:'Which model pictured electrons orbiting like planets?',choices:['Dalton','Thomson','Rutherford','Bohr'],answer:3,explanation:'Bohr proposed electrons orbit the nucleus in shells.'},
-    {question:'Which experiment showed the atom has a tiny dense nucleus?',choices:['Gold foil','Oil drop','Cathode ray','Double slit'],answer:0,explanation:'The gold foil experiment revealed a dense nucleus.'},
-    {question:'Which scientist suggested atoms were indivisible?',choices:['Democritus','Aristotle','Dalton','Rutherford'],answer:0,explanation:'Democritus suggested the idea of indivisible particles called atomos.'},
-    {question:'Which scientist discovered the neutron?',choices:['Bohr','Chadwick','Thomson','Rutherford'],answer:1,explanation:'James Chadwick discovered the neutron.'},
-    {question:'Protons and neutrons are held in the nucleus by:',choices:['Strong force','Gravity','Magnetic force','Van der Waals'],answer:0,explanation:'The strong nuclear force holds the nucleus together.'},
-    {question:'Which particle is lightest?',choices:['Neutron','Proton','Electron','Atom'],answer:2,explanation:'Electrons are much lighter than protons or neutrons.'},
-    {question:'Which of these describes the nucleus?',choices:['Small, dense, positively charged','Large and diffuse','Negatively charged','Made of electrons'],answer:0,explanation:'The nucleus is small, dense, and positively charged.'},
-    {question:'Which particle moves most rapidly in an atom?',choices:['Proton','Neutron','Electron','Nucleus'],answer:2,explanation:'Electrons move rapidly around the nucleus.'},
-    {question:'Which atomic particle is exchanged between atoms in ionic bonding?',choices:['Electron','Proton','Neutron','Molecule'],answer:0,explanation:'Ionic bonding transfers electrons from one atom to another.'},
-    {question:'Atomic number 17 belongs to:',choices:['Chlorine','Argon','Potassium','Calcium'],answer:0,explanation:'Chlorine has atomic number 17.'},
-    {question:'Number of shells in an argon atom is:',choices:['3','2','4','1'],answer:0,explanation:'Argon has three electron shells.'},
-    {question:'Which electron arrangement belongs to magnesium?',choices:['2,8,2','2,8,3','2,7,2','1,2,8'],answer:0,explanation:'Magnesium has 12 electrons arranged 2,8,2.'},
-    {question:'A neutron’s charge is:',choices:['Positive','Negative','Neutral','Variable'],answer:2,explanation:'Neutrons carry no electrical charge.'},
-    {question:'Which particle is not part of the atom’s mass?',choices:['Electron','Proton','Neutron','Nucleus'],answer:0,explanation:'Electrons contribute very little to atomic mass.'}
+    {question:'A neutral atom has 8 protons. How many electrons does it also have?',choices:['8','6','10','2'],answer:0,explanation:'A neutral atom has equal numbers of protons and electrons.'},
+    {question:'An element has atomic number 12. What does this number tell you?',choices:['It has 12 protons','It has 12 neutrons','It has 12 atoms','It has 12 molecules'],answer:0,explanation:'Atomic number equals the number of protons in the atom.'},
+    {question:'If an atom has equal numbers of protons and electrons, the atom is:',choices:['Neutral','Positive','Negative','A molecule'],answer:0,explanation:'Equal charges cancel and make the atom neutral.'},
+    {question:'Which particles are found in the nucleus of every atom?',choices:['Protons and neutrons','Electrons and protons','Electrons and neutrons','Only electrons'],answer:0,explanation:'The nucleus contains protons and neutrons.'},
+    {question:'Which particle is negatively charged and orbits the nucleus?',choices:['Electron','Proton','Neutron','Photon'],answer:0,explanation:'Electrons are negatively charged and move around the nucleus.'},
+    {question:'Which particle has no charge?',choices:['Neutron','Proton','Electron','Atom'],answer:0,explanation:'Neutrons are electrically neutral.'},
+    {question:'In the planetary model, electrons are arranged in:',choices:['Shells','Bones','Rings','Clouds'],answer:0,explanation:'Electrons occupy shells around the nucleus in this model.'},
+    {question:'Which element is most likely represented by an atom with 2 protons?',choices:['Helium','Oxygen','Hydrogen','Carbon'],answer:0,explanation:'Helium has atomic number 2 and therefore 2 protons.'},
+    {question:'To make a positive ion from a neutral sodium atom, you remove one:',choices:['Electron','Proton','Neutron','Nucleus'],answer:0,explanation:'Removing an electron leaves a positive ion.'},
+    {question:'Which subatomic particles have almost equal mass?',choices:['Proton and neutron','Electron and proton','Electron and neutron','Electron and atom'],answer:0,explanation:'Protons and neutrons have similar mass.'},
+    {question:'Which scientist proposed electrons in fixed orbits around the nucleus?',choices:['Bohr','Dalton','Thomson','Rutherford'],answer:0,explanation:'Niels Bohr suggested electrons orbit the nucleus in shells.'},
+    {question:'Which scientist discovered the electron using cathode rays?',choices:['Thomson','Bohr','Rutherford','Chadwick'],answer:0,explanation:'J.J. Thomson discovered the electron.'},
+    {question:'Which scientist discovered the neutron?',choices:['Chadwick','Bohr','Thomson','Rutherford'],answer:0,explanation:'James Chadwick discovered the neutron in 1932.'},
+    {question:'Which particle is exchanged during ionic bonding?',choices:['Electron','Proton','Neutron','Molecule'],answer:0,explanation:'Ionic bonds form when electrons are transferred between atoms.'},
+    {question:'Which part of the atom contains most of its mass?',choices:['Nucleus','Electron cloud','Outer shell','Valence shell'],answer:0,explanation:'The nucleus contains protons and neutrons and most of the atom\'s mass.'}
   ];
   atomic.forEach(function(item){ bank.push({topic:'Atomic structure',outcomes:['SC4-PRT-01'],type:'mcq',question:item.question,choices:item.choices,answer:item.answer,explanation:item.explanation});});
 
   var history=[
-    {question:'Who first proposed that matter is made of tiny indivisible particles called atomos?',choices:['Bohr','Rutherford','Democritus','Thomson'],answer:2,explanation:'Democritus proposed the atomos idea in ancient Greece.'},
-    {question:'The plum pudding model pictured the atom as:',choices:['A nucleus with shells','Electrons in a positive cloud','A hard sphere','Neutrons and protons only'],answer:1,explanation:'Thomson saw electrons embedded in a positive charge cloud.'},
-    {question:'Rutherford discovered the nucleus using:',choices:['A cathode ray tube','A gold foil experiment','A microscope','A spectroscope'],answer:1,explanation:'His gold foil experiment revealed a dense central nucleus.'},
-    {question:'Who discovered the neutron?',choices:['Bohr','Chadwick','Thomson','Democritus'],answer:1,explanation:'James Chadwick discovered the neutron in 1932.'},
-    {question:'Which scientist discovered the electron?',choices:['Thomson','Bohr','Rutherford','Chadwick'],answer:0,explanation:'J.J. Thomson discovered the electron.'},
-    {question:'Who proposed that electrons occupy shells?',choices:['Bohr','Dalton','Rutherford','Democritus'],answer:0,explanation:'Niels Bohr proposed that electrons occupy shells.'},
-    {question:'Which model came after Thomson’s plum pudding?',choices:['Bohr model','Dalton’s model','Molecule theory','Modern quantum model'],answer:0,explanation:'The Bohr model replaced the plum pudding model.'},
-    {question:'Dalton thought atoms were:',choices:['Tiny indivisible spheres','Made of protons','Linked by electrons','All the same'],answer:0,explanation:'Dalton described atoms as tiny indivisible spheres.'},
-    {question:'Rutherford’s model showed atoms are mostly:',choices:['Empty space','Solid','Liquid','Gas'],answer:0,explanation:'His experiment showed most of the atom is empty space.'},
-    {question:'Which experiment discovered the electron?',choices:['Cathode ray','Gold foil','Photoelectric','Electrolysis'],answer:0,explanation:'The cathode ray experiment led to the discovery of the electron.'},
-    {question:'Which scientist used a cathode ray tube?',choices:['Thomson','Bohr','Rutherford','Chadwick'],answer:0,explanation:'Thomson used a cathode ray tube in his electron discovery.'},
-    {question:'Which idea came from early Greek philosophers?',choices:['Matter made of atoms','Electrons in shells','Nucleus exists','Quantum jumps'],answer:0,explanation:'Greek philosophers like Democritus proposed that matter was made of atoms.'}
+    {question:'An ancient philosopher named his tiny particles atomos. Who was he?',choices:['Bohr','Rutherford','Democritus','Thomson'],answer:2,explanation:'Democritus proposed that matter was made of indivisible particles called atomos.'},
+    {question:'A model showed electrons in a cloud of positive charge. Which atomic model was this?',choices:['Plum pudding','Bohr model','Dalton model','Modern model'],answer:0,explanation:'Thomson\'s plum pudding model pictured electrons embedded in a positive cloud.'},
+    {question:'A gold foil experiment revealed a small dense nucleus. Who performed it?',choices:['Rutherford','Thomson','Bohr','Dalton'],answer:0,explanation:'Rutherford used the gold foil experiment to discover the nucleus.'},
+    {question:'Which scientist discovered the electron with a cathode ray tube?',choices:['Thomson','Bohr','Rutherford','Chadwick'],answer:0,explanation:'J.J. Thomson discovered the electron using cathode rays.'},
+    {question:'Which scientist discovered the neutron in 1932?',choices:['Chadwick','Bohr','Thomson','Rutherford'],answer:0,explanation:'James Chadwick discovered the neutron.'},
+    {question:'Which model pictured electrons in fixed shells around the nucleus?',choices:['Bohr model','Plum pudding','Dalton model','Modern model'],answer:0,explanation:'The Bohr model placed electrons in fixed orbits or shells.'},
+    {question:'Dalton imagined atoms as tiny indivisible spheres. What was this model called?',choices:['Dalton\'s model','Bohr model','Plum pudding','Quantum model'],answer:0,explanation:'Dalton described atoms as tiny indivisible spheres.'},
+    {question:'Which model came directly after the plum pudding model?',choices:['Bohr model','Dalton\'s model','Quantum model','Nuclear model'],answer:0,explanation:'The Bohr model followed Thomson\'s plum pudding model.'}
   ];
   history.forEach(function(item){ bank.push({topic:'History',outcomes:['SC4-PRT-01'],type:'mcq',question:item.question,choices:item.choices,answer:item.answer,explanation:item.explanation});});
 
   var periodic=[
-    {question:'Vertical columns in the periodic table are called:',choices:['Periods','Groups','Rows','Shells'],answer:1,explanation:'Columns are groups.'},
-    {question:'Group 18 elements are also called:',choices:['Alkali metals','Halogens','Noble gases','Transition metals'],answer:2,explanation:'Group 18 contains noble gases.'},
-    {question:'Which symbol belongs to oxygen?',choices:['O','Ox','Og','Ow'],answer:0,explanation:'O is oxygen’s chemical symbol.'},
-    {question:'Why do elements in the same group behave similarly?',choices:['Same valence electrons','Same neutrons','Same mass','Same colour'],answer:0,explanation:'Same valence electron count gives similar chemistry.'},
-    {question:'Which element is in group 1?',choices:['Hydrogen','Helium','Carbon','Neon'],answer:0,explanation:'Hydrogen is a group 1 element.'},
-    {question:'Which element is a noble gas?',choices:['Argon','Chlorine','Sodium','Iron'],answer:0,explanation:'Argon is a noble gas.'},
-    {question:'Which element is in period 2?',choices:['Carbon','Sodium','Calcium','Potassium'],answer:0,explanation:'Carbon is in period 2.'},
-    {question:'Which of these is a transition metal?',choices:['Iron','Oxygen','Nitrogen','Neon'],answer:0,explanation:'Iron is a transition metal.'},
-    {question:'Which element has atomic number 12?',choices:['Magnesium','Carbon','Calcium','Sodium'],answer:0,explanation:'Magnesium has atomic number 12.'},
-    {question:'Which element has symbol Na?',choices:['Sodium','Nitrogen','Neon','Nickel'],answer:0,explanation:'Na is the symbol for sodium.'},
-    {question:'Elements in the same period have the same number of:',choices:['Shells','Protons','Electrons','Neutrons'],answer:0,explanation:'Elements in a period share the same number of electron shells.'},
-    {question:'Which group contains the halogens?',choices:['17','18','1','2'],answer:0,explanation:'Halogens are found in group 17.'},
-    {question:'Which element is in group 17?',choices:['Chlorine','Neon','Argon','Potassium'],answer:0,explanation:'Chlorine is a group 17 halogen.'},
-    {question:'Which element is a metalloid?',choices:['Silicon','Oxygen','Iron','Sodium'],answer:0,explanation:'Silicon is a metalloid.'},
-    {question:'Which element is not a metal?',choices:['Carbon','Iron','Copper','Gold'],answer:0,explanation:'Carbon is a non-metal.'},
-    {question:'Which element is a solid at room temperature?',choices:['Carbon','Neon','Helium','Argon'],answer:0,explanation:'Carbon is solid at room temperature.'},
-    {question:'Which element is a diatomic molecule at room temperature?',choices:['Nitrogen','Neon','Sodium','Helium'],answer:0,explanation:'Nitrogen exists as N2 gas at room temperature.'},
-    {question:'Which element is a halogen gas?',choices:['Chlorine','Argon','Carbon','Iron'],answer:0,explanation:'Chlorine is a halogen gas.'},
-    {question:'Which element has atomic number 8?',choices:['Oxygen','Carbon','Nitrogen','Fluorine'],answer:0,explanation:'Oxygen has atomic number 8.'},
-    {question:'Which element is in group 2?',choices:['Calcium','Sodium','Chlorine','Neon'],answer:0,explanation:'Calcium is a group 2 element.'},
-    {question:'Which element in period 3 is a noble gas?',choices:['Argon','Neon','Krypton','Helium'],answer:0,explanation:'Argon is the period 3 noble gas.'},
-    {question:'Which element symbol is Al?',choices:['Aluminum','Argon','Gold','Silver'],answer:0,explanation:'Al is the symbol for aluminum.'},
-    {question:'Which element is in group 16?',choices:['Oxygen','Neon','Sodium','Potassium'],answer:0,explanation:'Oxygen is in group 16.'},
-    {question:'Which element is a liquid at room temperature?',choices:['Mercury','Iron','Carbon','Sodium'],answer:0,explanation:'Mercury is a liquid metal at room temperature.'},
-    {question:'Which element is in period 4 and group 1?',choices:['Potassium','Calcium','Bromine','Gallium'],answer:0,explanation:'Potassium is in period 4, group 1.'},
-    {question:'Which element has chemical symbol K?',choices:['Potassium','Krypton','Calcium','Sulfur'],answer:0,explanation:'K is the symbol for potassium.'},
-    {question:'Which element is needed for breathing?',choices:['Oxygen','Neon','Gold','Copper'],answer:0,explanation:'Oxygen is needed for breathing.'},
-    {question:'Which element forms a +1 ion easily?',choices:['Sodium','Oxygen','Carbon','Helium'],answer:0,explanation:'Sodium commonly forms +1 ions.'},
-    {question:'Which element is a metalloid used in electronics?',choices:['Silicon','Sodium','Argon','Neon'],answer:0,explanation:'Silicon is used in electronic devices.'},
-    {question:'Which group contains the alkaline earth metals?',choices:['2','1','17','18'],answer:0,explanation:'Alkaline earth metals are in group 2.'}
+    {question:'A column of elements with similar chemistry is called what?',choices:['Group','Period','Row','Block'],answer:0,explanation:'Columns on the periodic table are called groups.'},
+    {question:'The noble gas in period 2 is which element?',choices:['Neon','Argon','Helium','Krypton'],answer:0,explanation:'Neon is the period 2 noble gas.'},
+    {question:'Which element is in group 1 and period 3?',choices:['Sodium','Lithium','Potassium','Magnesium'],answer:0,explanation:'Sodium is in group 1, period 3.'},
+    {question:'A student checks the symbol K on the periodic table. Which element is it?',choices:['Potassium','Krypton','Calcium','Sulfur'],answer:0,explanation:'K is the chemical symbol for potassium.'},
+    {question:'An element has atomic number 8. Which one is it?',choices:['Oxygen','Carbon','Nitrogen','Fluorine'],answer:0,explanation:'Oxygen is element number 8.'},
+    {question:'Which period contains the element chlorine?',choices:['Period 3','Period 2','Period 4','Period 1'],answer:0,explanation:'Chlorine is in period 3 of the periodic table.'},
+    {question:'Which element is a metalloid commonly used in computer chips?',choices:['Silicon','Oxygen','Iron','Sodium'],answer:0,explanation:'Silicon is a metalloid used in electronics.'},
+    {question:'Which group contains the noble gases?',choices:['18','17','1','2'],answer:0,explanation:'Group 18 contains the noble gases.'},
+    {question:'Argon is unreactive because it is in which part of the periodic table?',choices:['Group 18','Group 1','Period 2','Transition metals'],answer:0,explanation:'Argon is a noble gas in group 18 and is unreactive.'},
+    {question:'Elements in the same period share the same number of:',choices:['Electron shells','Protons','Neutrons','Molecules'],answer:0,explanation:'Elements in a period have the same number of electron shells.'},
+    {question:'Which element is in group 17 and period 3?',choices:['Chlorine','Neon','Argon','Potassium'],answer:0,explanation:'Chlorine is a group 17 element in period 3.'},
+    {question:'Which element is a liquid metal at room temperature?',choices:['Mercury','Iron','Gold','Helium'],answer:0,explanation:'Mercury is the only metal liquid at room temperature.'},
+    {question:'Which element is a halogen gas at room temperature?',choices:['Chlorine','Argon','Oxygen','Carbon'],answer:0,explanation:'Chlorine is a halogen gas.'},
+    {question:'Which element has the symbol Al?',choices:['Aluminium','Argon','Gold','Silver'],answer:0,explanation:'Al is the symbol for aluminium.'},
+    {question:'Which element in period 2 is a non-metal gas used for breathing?',choices:['Oxygen','Nitrogen','Neon','Carbon'],answer:0,explanation:'Oxygen is a non-metal gas in period 2.'},
+    {question:'Which element in the periodic table readily forms a +1 ion?',choices:['Sodium','Oxygen','Carbon','Argon'],answer:0,explanation:'Sodium commonly forms +1 ions.'}
   ];
   periodic.forEach(function(item){ bank.push({topic:'Periodic table',outcomes:['SC4-PRT-01'],type:'mcq',question:item.question,choices:item.choices,answer:item.answer,explanation:item.explanation});});
 
   var reactivity=[
-    {question:'A metal conducts electricity because it has:',choices:['Free electrons','Heavy atoms','No neutrons','Only protons'],answer:0,explanation:'Free electrons move through the metal and carry electric charge.'},
-    {question:'Which element is a halogen?',choices:['Sodium','Chlorine','Argon','Iron'],answer:1,explanation:'Chlorine is a halogen in group 17.'},
-    {question:'As you go down Group 1, metal reactivity:',choices:['Decreases','Increases','Stays the same','Disappears'],answer:1,explanation:'Alkali metals become more reactive down the group.'},
-    {question:'Which metal reacts most explosively with water?',choices:['Potassium','Iron','Copper','Zinc'],answer:0,explanation:'Potassium reacts strongly with water.'},
-    {question:'Which gas is produced when acid reacts with magnesium?',choices:['Oxygen','Nitrogen','Hydrogen','Carbon dioxide'],answer:2,explanation:'Hydrogen gas is produced when acids react with metals.'},
-    {question:'Which reaction forms rust?',choices:['Iron + oxygen','Sodium + water','Hydrogen + oxygen','Carbon + oxygen'],answer:0,explanation:'Rust forms when iron reacts with oxygen.'},
-    {question:'Which substance is most reactive with water?',choices:['Sodium','Gold','Silver','Platinum'],answer:0,explanation:'Sodium reacts readily with water.'},
-    {question:'Which is a product of burning hydrogen gas?',choices:['Water','Carbon dioxide','Sodium chloride','Oxygen'],answer:0,explanation:'Burning hydrogen forms water.'},
-    {question:'Which type of reaction releases energy in the form of heat?',choices:['Exothermic','Endothermic','Neutral','Static'],answer:0,explanation:'Exothermic reactions release heat.'},
-    {question:'Which metal is least reactive in everyday conditions?',choices:['Gold','Sodium','Potassium','Calcium'],answer:0,explanation:'Gold is very stable and not easily reactive.'},
-    {question:'Which of these is a chemical reaction?',choices:['Baking cake','Freezing water','Tearing paper','Dissolving sugar'],answer:0,explanation:'Baking cake makes new substances and is chemical.'},
-    {question:'Which change produces a new substance?',choices:['Rusting','Cutting','Melting','Boiling'],answer:0,explanation:'Rusting is a chemical change that forms a new substance.'},
-    {question:'Which element is most reactive in Group 17?',choices:['Fluorine','Chlorine','Bromine','Iodine'],answer:0,explanation:'Fluorine is the most reactive halogen.'},
+    {question:'A strip of sodium metal is dropped into water and bursts into flame. Why did this happen?',choices:['Sodium is very reactive with water','Sodium is not reactive','Water is a base','The metal is a noble gas'],answer:0,explanation:'Sodium reacts explosively with water because it is a very reactive alkali metal.'},
+    {question:'A gas from group 17 is the most reactive of all the halogens. Which gas is it?',choices:['Fluorine','Chlorine','Bromine','Iodine'],answer:0,explanation:'Fluorine is the most reactive halogen.'},
+    {question:'As you move down group 1 of the periodic table, how does reactivity change?',choices:['Increases','Decreases','Stays the same','Becomes zero'],answer:0,explanation:'Alkali metals become more reactive as you go down group 1.'},
+    {question:'Iron reacts with oxygen and water to form rust. This is an example of what kind of change?',choices:['Chemical change','Physical change','Reversible change','Dissolving'],answer:0,explanation:'Rusting produces a new substance, so it is a chemical change.'},
+    {question:'When magnesium reacts with an acid, which gas is produced?',choices:['Hydrogen','Oxygen','Nitrogen','Carbon dioxide'],answer:0,explanation:'Hydrogen gas forms when magnesium reacts with acid.'},
+    {question:'Which everyday metal is least likely to react and tarnish quickly?',choices:['Gold','Sodium','Potassium','Calcium'],answer:0,explanation:'Gold is very unreactive and does not tarnish easily.'},
+    {question:'A student compares chlorine and argon. Which one is least reactive?',choices:['Argon','Chlorine','Both are equally reactive','Neither reacts'],answer:0,explanation:'Argon is a noble gas and is much less reactive than chlorine.'},
+    {question:'Which reaction releases heat and is described as exothermic?',choices:['Burning hydrogen','Melting ice','Evaporating water','Dissolving salt'],answer:0,explanation:'Burning hydrogen releases heat, so it is exothermic.'},
+    {question:'A pale green solution turns cloudy with solid when two solutions are mixed. What has likely happened?',choices:['A precipitate formed','A physical change occurred','A gas escaped','The temperature dropped only'],answer:0,explanation:'Cloudiness and solid formation indicate a precipitate in a chemical reaction.'},
+    {question:'Which substance is a noble gas and rarely reacts?',choices:['Argon','Chlorine','Sodium','Iron'],answer:0,explanation:'Argon is a noble gas and does not react easily.'},
     {question:'Which group contains the most reactive metals?',choices:['Alkali metals','Noble gases','Halogens','Transition metals'],answer:0,explanation:'Alkali metals are the most reactive metals.'},
-    {question:'Which metal is in Group 1?',choices:['Lithium','Calcium','Neon','Helium'],answer:0,explanation:'Lithium is an alkali metal in group 1.'},
-    {question:'Which halogen is a liquid at room temperature?',choices:['Bromine','Chlorine','Fluorine','Iodine'],answer:0,explanation:'Bromine is a liquid halogen at room temperature.'},
-    {question:'Which process breaks a compound into simpler substances?',choices:['Decomposition','Synthesis','Combustion','Dissolving'],answer:0,explanation:'Decomposition reactions break compounds apart.'},
-    {question:'Which of these is a sign of reactivity?',choices:['Colour change','The material is blue','The object is big','The object is round'],answer:0,explanation:'Colour change can indicate a chemical reaction.'},
-    {question:'Which substance is not reactive?',choices:['Neon','Sodium','Potassium','Calcium'],answer:0,explanation:'Neon is a noble gas and is not reactive.'},
-    {question:'Which reaction forms a precipitate?',choices:['Mixing two soluble salts','Heating a metal','Melting ice','Distilling water'],answer:0,explanation:'A precipitate forms when two solutions react to make an insoluble solid.'},
-    {question:'Which term describes the tendency of an atom to gain electrons?',choices:['Electronegative','Electropositive','Ionizable','Reactivity'],answer:0,explanation:'Electronegative atoms tend to attract electrons.'},
-    {question:'Which of these is a strong acid?',choices:['Hydrochloric acid','Water','Sodium chloride','Oxygen'],answer:0,explanation:'Hydrochloric acid is a strong acid.'},
-    {question:'Which of these is a base?',choices:['Sodium hydroxide','Sodium chloride','Carbon dioxide','Nitrogen'],answer:0,explanation:'Sodium hydroxide is a base.'},
-    {question:'Which reaction happens between an acid and a metal?',choices:['Salt and hydrogen','Water and oxygen','Carbon dioxide and water','Salt and oxygen'],answer:0,explanation:'Acid plus metal produces salt and hydrogen gas.'},
-    {question:'Which substance is a noble gas and does not react easily?',choices:['Argon','Hydrogen','Oxygen','Chlorine'],answer:0,explanation:'Argon is chemically inert.'},
-    {question:'Which atom has 1 valence electron and reacts easily?',choices:['Sodium','Neon','Argon','Helium'],answer:0,explanation:'Sodium has one valence electron and reacts easily.'},
-    {question:'Which of these is a product of neutralisation?',choices:['Salt','Helium','Gold','Neon'],answer:0,explanation:'Neutralisation produces a salt.'},
-    {question:'Which process is decomposition?',choices:['AB -> A + B','A + B -> AB','A + O2 -> AO','A -> A + B'],answer:0,explanation:'Decomposition breaks a compound into simpler substances.'},
-    {question:'Which group of elements is most likely to form positive ions?',choices:['Metals','Non-metals','Gases','Noble gases'],answer:0,explanation:'Metals often lose electrons to form positive ions.'}
+    {question:'Which atom is most likely to lose one electron to form a +1 ion?',choices:['Sodium','Oxygen','Neon','Magnesium'],answer:0,explanation:'Sodium commonly loses one electron to become Na+.'},
+    {question:'Why would a scientist classify fluorine as highly reactive?',choices:['It has a strong pull on electrons','It has a low boiling point','It is a metal','It has no valence electrons'],answer:0,explanation:'Fluorine strongly attracts electrons and reacts easily.'},
+    {question:'What happens when a metal reacts with oxygen to form a metal oxide?',choices:['A new substance is formed','The metal melts only','The metal becomes a gas','The mixture separates'],answer:0,explanation:'Metal reacting with oxygen produces a new compound, a metal oxide.'},
+    {question:'Which gas forms when an acid reacts with a metal like zinc?',choices:['Hydrogen','Oxygen','Chlorine','Nitrogen'],answer:0,explanation:'Hydrogen gas is produced from acid-metal reactions.'}
   ];
   reactivity.forEach(function(item){ bank.push({topic:'Reactivity',outcomes:['SC4-PRT-01'],type:'mcq',question:item.question,choices:item.choices,answer:item.answer,explanation:item.explanation});});
 
   var change=[
-    {question:'Melting ice is a:',choices:['Chemical change','Physical change','Nuclear change','Electrical change'],answer:1,explanation:'Melting changes state but not substance identity.'},
-    {question:'A precipitate is:',choices:['A gas released','A solid formed in a solution','A type of energy','A charged particle'],answer:1,explanation:'A precipitate is an insoluble solid formed in a reaction.'},
-    {question:'Which is the best sign of a chemical reaction?',choices:['A change of shape','A new substance forms','The object moves','It melts'],answer:1,explanation:'New substance formation is the strongest sign of a chemical reaction.'},
-    {question:'Which of these is a chemical change?',choices:['Burning paper','Cutting paper','Melting ice','Dissolving sugar'],answer:0,explanation:'Burning paper forms new substances.'},
-    {question:'Which of these is a physical change?',choices:['Boiling water','Burning wood','Rusting iron','Baking bread'],answer:0,explanation:'Boiling water changes state but not chemical identity.'},
-    {question:'What is produced when vinegar reacts with baking soda?',choices:['Carbon dioxide','Oxygen','Hydrogen','Nitrogen'],answer:0,explanation:'Carbon dioxide gas forms in that reaction.'},
-    {question:'Which change is endothermic?',choices:['Ice melting','Fire burning','Rusting','Exploding'],answer:0,explanation:'Melting ice absorbs heat.'},
-    {question:'Which change is exothermic?',choices:['Combustion','Melting','Evaporation','Sublimation'],answer:0,explanation:'Combustion releases heat.'},
-    {question:'Which of these shows a chemical reaction?',choices:['Bubbles forming','Water boiling','Sugar dissolving','Rope stretching'],answer:0,explanation:'Bubbles may indicate a chemical reaction producing gas.'},
-    {question:'Which change can be reversed easily?',choices:['Freezing water','Burning paper','Rusting iron','Cooking an egg'],answer:0,explanation:'Freezing water is reversible when it melts.'},
-    {question:'Which change usually absorbs energy?',choices:['Photosynthesis','Burning','Rusting','Condensation'],answer:0,explanation:'Photosynthesis takes in energy from sunlight.'},
-    {question:'Which of these is a reaction product?',choices:['Gas','Shape','Weight','Volume'],answer:0,explanation:'A product is a substance created by the reaction.'},
-    {question:'Which type of change forms a new substance?',choices:['Chemical','Physical','Mechanical','Electrical'],answer:0,explanation:'Chemical changes produce new substances.'},
-    {question:'Which change is least likely to be reversible?',choices:['Burning','Freezing','Melting','Dissolving'],answer:0,explanation:'Burning usually cannot be reversed.'},
-    {question:'Which change involves a colour change and gas formation?',choices:['Chemical reaction','Physical change','Mechanical change','Dissolving'],answer:0,explanation:'These are common signs of a chemical reaction.'},
-    {question:'Which process separates a mixture by boiling points?',choices:['Distillation','Filtration','Magnetism','Evaporation'],answer:0,explanation:'Distillation separates substances using boiling points.'},
-    {question:'Which is an indicator of a chemical reaction: Temperature change',choices:['Temperature change','Change of size','Change of speed','Change of shape'],answer:0,explanation:'Temperature change is a clue that a chemical reaction may be occurring.'},
-    {question:'Which process is not a chemical change?',choices:['Grinding','Burning','Rusting','Reacting'],answer:0,explanation:'Grinding only changes the shape of a material.'},
-    {question:'Which occurs when sugar dissolves in water?',choices:['Solution formation','New substance','Precipitate','Gas release'],answer:0,explanation:'Dissolving sugar makes a solution, not a new substance.'}
+    {question:'A candle wax melts and becomes liquid, but the wax remains wax. What kind of change is this?',choices:['Physical change','Chemical change','Nuclear change','Biological change'],answer:0,explanation:'Melting changes state, not the substance itself.'},
+    {question:'Baking bread changes the ingredients into a new substance. This is an example of:',choices:['Chemical change','Physical change','Mechanical change','Dissolving'],answer:0,explanation:'Baking produces new substances, so it is a chemical change.'},
+    {question:'A student dissolves salt in water and evaporates the water to recover the salt. What does this show?',choices:['Physical change','Chemical change','Nuclear change','Biological change'],answer:0,explanation:'The salt is unchanged, so the process is a physical change.'},
+    {question:'A clear solution turns cloudy and a solid forms when two liquids are mixed. What happened?',choices:['A precipitate formed','A physical change occurred','A gas escaped','The liquid boiled'],answer:0,explanation:'Cloudiness and solid formation indicate a precipitate, a chemical change.'},
+    {question:'Water freezes into ice when heat is removed. This change is called:',choices:['Freezing','Melting','Evaporation','Condensation'],answer:0,explanation:'Freezing is the change from liquid to solid.'},
+    {question:'When an acid reacts with metal to produce bubbles, this usually means:',choices:['A chemical reaction is happening','Only a physical change is happening','The metal is melting','The solution is evaporating'],answer:0,explanation:'Bubbles typically show a gas is produced in a chemical reaction.'},
+    {question:'Which change is usually endothermic?',choices:['Melting ice','Burning wood','Rusting iron','Freezing water'],answer:0,explanation:'Melting absorbs heat, so it is endothermic.'},
+    {question:'Which change is usually exothermic?',choices:['Burning','Melting','Dissolving sugar','Evaporating water'],answer:0,explanation:'Burning releases heat, so it is exothermic.'},
+    {question:'Which process uses boiling point differences to separate a mixture?',choices:['Distillation','Filtration','Magnetism','Sieving'],answer:0,explanation:'Distillation separates substances based on boiling points.'},
+    {question:'Sugar dissolves in water and can be recovered unchanged. This change is:',choices:['Physical','Chemical','Nuclear','Thermal'],answer:0,explanation:'Dissolving sugar is a physical change because the sugar remains the same substance.'}
   ];
   change.forEach(function(item){ bank.push({topic:'Change',outcomes:['SC4-PRT-01'],type:'mcq',question:item.question,choices:item.choices,answer:item.answer,explanation:item.explanation});});
 
   var working=[
-    {question:'A fair test should:',choices:['Change several variables','Change only one variable','Use a different method each time','Avoid recording data'],answer:1,explanation:'A fair test changes only one variable.'},
-    {question:'Tables and graphs are used to:',choices:['Ignore the data','Show patterns in data','Make the test harder','Label equipment'],answer:1,explanation:'They help organise and present data.'},
-    {question:'Which tool measures temperature?',choices:['Ruler','Thermometer','Balance','Magnifying glass'],answer:1,explanation:'A thermometer measures temperature.'},
-    {question:'Why repeat a measurement?',choices:['To check results','To make them worse','To change variables','To waste time'],answer:0,explanation:'Repeating measurements helps verify data.'},
-    {question:'Which is an independent variable?',choices:['Time measured','Size measured','Variable changed deliberately','Outcome observed'],answer:2,explanation:'The independent variable is deliberately changed.'},
-    {question:'Which is a dependent variable?',choices:['Result measured','Variable changed','Controlled factor','Equipment used'],answer:0,explanation:'The dependent variable is what you measure.'},
-    {question:'Which variable is kept constant?',choices:['Control variable','Independent variable','Dependent variable','Random variable'],answer:0,explanation:'Control variables are kept the same.'},
-    {question:'A hypothesis is:',choices:['A testable prediction','A final result','A list of equipment','A graph'],answer:0,explanation:'A hypothesis is a prediction that can be tested.'},
-    {question:'Which is part of a valid conclusion?',choices:['Evidence','Opinion','Guess','Story'],answer:0,explanation:'Conclusions should be based on evidence.'},
-    {question:'Which graph is best for comparing categories?',choices:['Bar graph','Line graph','Pie chart','Scatterplot'],answer:0,explanation:'Bar graphs compare categories clearly.'},
-    {question:'Which graph is best for tracking change over time?',choices:['Bar graph','Line graph','Pie chart','Table'],answer:1,explanation:'Line graphs show trends over time.'},
-    {question:'Which tool measures mass?',choices:['Balance','Thermometer','Ruler','Beaker'],answer:0,explanation:'A balance measures mass.'},
-    {question:'Which axis normally shows the dependent variable?',choices:['Y-axis','X-axis','Z-axis','None'],answer:0,explanation:'The dependent variable is usually on the y-axis.'},
-    {question:'To improve reliability, you should:',choices:['Repeat trials','Change variables','Use fewer measurements','Skip steps'],answer:0,explanation:'Repeating trials improves reliability.'},
-    {question:'Reliability means:',choices:['Same results repeated','True value','Fast results','Random outcomes'],answer:0,explanation:'Reliable results are repeatable.'},
-    {question:'Accuracy means:',choices:['Close to true value','Repeatable results','Same method each time','High speed'],answer:0,explanation:'Accuracy is how close measurements are to the true value.'},
-    {question:'Which is a control variable?',choices:['Amount of water','Type of seed','Experiment question','Data table'],answer:0,explanation:'Control variables are kept constant, such as water amount.'},
-    {question:'Why use a control group?',choices:['Compare results','Make experiment harder','Use different chemicals','Increase error'],answer:0,explanation:'Control groups provide a baseline for comparison.'},
-    {question:'What does a fair test need?',choices:['Only one variable changes','All variables change','No measurements','No repeats'],answer:0,explanation:'Only one variable should change in a fair test.'},
-    {question:'Which is a qualitative observation?',choices:['Colour','Mass','Length','Temperature'],answer:0,explanation:'Colour is described without numbers.'},
-    {question:'Which is a quantitative observation?',choices:['Number of beats','Colour','Texture','Smell'],answer:0,explanation:'Quantitative observations use numbers.'},
-    {question:'Which is a good conclusion?',choices:['Uses evidence','Gives opinions only','Ignores data','Is very short'],answer:0,explanation:'Good conclusions are evidence-based.'},
-    {question:'Which measurement unit is used for length?',choices:['Centimetres','Grams','Seconds','Degrees'],answer:0,explanation:'Length is measured in centimetres.'},
-    {question:'Which measurement unit is used for mass?',choices:['Grams','Metres','Seconds','Litres'],answer:0,explanation:'Mass is measured in grams.'},
-    {question:'Which measurement unit is used for time?',choices:['Seconds','Grams','Metres','Degrees'],answer:0,explanation:'Time is measured in seconds.'},
-    {question:'Which tool measures volume of a liquid?',choices:['Graduated cylinder','Balance','Thermometer','Ruler'],answer:0,explanation:'A graduated cylinder measures liquid volume.'},
-    {question:'What is the purpose of a table?',choices:['Organise data','Heat a sample','Change variables','Measure mass'],answer:0,explanation:'Tables organise experimental data.'},
-    {question:'What does a bar graph show?',choices:['Differences between categories','Exact numbers only','Chemical formula','Physical states'],answer:0,explanation:'Bar graphs compare categories visually.'},
-    {question:'What does a line graph show?',choices:['Trends over time','Colour of objects','Type of material','Chemical composition'],answer:0,explanation:'Line graphs show patterns and trends.'},
-    {question:'If plants receive more light, they will grow taller is a:',choices:['Hypothesis','Conclusion','Control','Result'],answer:0,explanation:'That statement is a hypothesis.'},
-    {question:'Which part of a report explains methods?',choices:['Procedure','Hypothesis','Conclusion','Results'],answer:0,explanation:'The procedure describes how the experiment was done.'},
-    {question:'Which is the first step in the scientific method?',choices:['Ask a question','Draw a conclusion','Collect data','Make a table'],answer:0,explanation:'Asking a question starts the scientific process.'},
-    {question:'Which is the last step in the scientific method?',choices:['Draw conclusions','Ask a question','Plan experiment','Repeat measurements'],answer:0,explanation:'Drawing conclusions comes after analysing results.'},
-    {question:'When data points are close together, precision is:',choices:['High','Low','None','Random'],answer:0,explanation:'Close data points show high precision.'},
-    {question:'When an experiment is repeated by someone else, this checks:',choices:['Reproducibility','Size','Colour','Shape'],answer:0,explanation:'Reproducibility means others can repeat the experiment and get similar results.'},
-    {question:'Which is a fair test?',choices:['Keep only one variable changing','Change all the variables','Avoid recording results','Use different equipment each time'],answer:0,explanation:'A fair test changes only one variable and keeps all others constant.'},
-    {question:'Which item is a hypothesis?',choices:['More salt will make the circuit brighter','The circuit is complete','The battery is hot','The wire is red'],answer:0,explanation:'A hypothesis is a testable prediction about what may happen.'},
-    {question:'Which strategy reduces random error?',choices:['Average many trials','Use one measurement','Ignore outliers','Change variables'],answer:0,explanation:'Averaging several trials reduces random error.'},
-    {question:'Which graph has sectors that show parts of a whole?',choices:['Pie chart','Line graph','Bar graph','Histogram'],answer:0,explanation:'Pie charts illustrate parts of a whole.'},
-    {question:'Which is a dependent variable?',choices:['The result that is measured','The factor changed deliberately','The condition kept constant','The question asked'],answer:0,explanation:'The dependent variable is the result you measure.'},
-    {question:'Which is an independent variable?',choices:['The factor changed deliberately','The result that is measured','The condition kept constant','The question asked'],answer:0,explanation:'The independent variable is the one changed deliberately.'},
-    {question:'Which instrument measures temperature change?',choices:['Thermometer','Balance','Ruler','Stopwatch'],answer:0,explanation:'A thermometer measures temperature change.'},
-    {question:'Which unit measures liquid volume?',choices:['mL','kg','m','°C'],answer:0,explanation:'Liquid volume is measured in millilitres.'},
-    {question:'Which tool is best for measuring pencil length?',choices:['Ruler','Thermometer','Balance','Stopwatch'],answer:0,explanation:'A ruler measures length.'},
-    {question:'What does repeatability mean?',choices:['Same person gets same result','Different people get same result','Results change randomly','Experiment is short'],answer:0,explanation:'Repeatability means the same person can get the same result again.'},
-    {question:'In a valid experiment, data is:',choices:['Measured and recorded','Imagined','Ignored','Estimated randomly'],answer:0,explanation:'Valid experiments measure and record data carefully.'},
-    {question:'Which of these is a variable?',choices:['Temperature','Colour','Shape','All of these'],answer:3,explanation:'Variables are any factors that can change.'},
-    {question:'Which statement describes a conclusion?',choices:['Summarises findings','Lists equipment','Describes method','Shows raw data'],answer:0,explanation:'A conclusion summarises what was learned.'},
-    {question:'Which tool measures the time of an event?',choices:['Stopwatch','Balance','Thermometer','Protractor'],answer:0,explanation:'A stopwatch measures elapsed time.'},
-    {question:'Why is it important to keep a variable constant?',choices:['So the test is fair','So results are random','So data are ignored','So the experiment is hard'],answer:0,explanation:'Keeping variables constant helps ensure a fair comparison.'}
+    {question:'A student writes a plan before starting an experiment. What is this plan called?',choices:['Procedure','Hypothesis','Conclusion','Data table'],answer:0,explanation:'A procedure is the planned set of steps for an experiment.'},
+    {question:'A scientist wants to compare how temperature affects solubility. Which variable should be changed deliberately?',choices:['Temperature','Volume of solution','Colour of container','Type of paper'],answer:0,explanation:'The independent variable is the one changed intentionally, such as temperature.'},
+    {question:'A student measures the amount of gas produced in a reaction. Which variable is this?',choices:['Dependent variable','Independent variable','Control variable','Random variable'],answer:0,explanation:'The dependent variable is what is measured in the experiment.'},
+    {question:'A group uses the same size sample and same equipment each time. What are they keeping constant?',choices:['Control variables','Independent variables','Dependent variables','Hypotheses'],answer:0,explanation:'Control variables are kept the same to make the test fair.'},
+    {question:'They record temperature every minute and plot it on a line graph. Why is a line graph a good choice?',choices:['It shows change over time','It compares categories','It shows parts of a whole','It records single values'],answer:0,explanation:'Line graphs are best for showing how a measurement changes over time.'},
+    {question:'Which graph would be best to compare the mass of different metals?',choices:['Bar graph','Line graph','Pie chart','Scatterplot'],answer:0,explanation:'Bar graphs compare values for different categories.'},
+    {question:'A student repeats the same measurement three times and gets similar results. This improves:',choices:['Reliability','Accuracy','Speed','Creativity'],answer:0,explanation:'Repeating measurements improves reliability.'},
+    {question:'Which tool is most suitable for measuring the mass of a sample?',choices:['Balance','Thermometer','Ruler','Beaker'],answer:0,explanation:'A balance is designed to measure mass.'},
+    {question:'Which practice helps make an investigation valid?',choices:['Following a planned procedure','Changing many variables at once','Ignoring data','Using broken equipment'],answer:0,explanation:'Valid investigations follow a planned method and proper safety rules.'},
+    {question:'Why are predictions useful in investigations?',choices:['They help guide what you test','They give the final answer','They replace data collection','They are only for homework'],answer:0,explanation:'Predictions guide the experiment and help scientists compare results to expectations.'}
   ];
   working.forEach(function(item){ bank.push({topic:'Working science',outcomes:['SC5-WS-01','SC4-WS-02','SC4-WS-04','SC4-WS-05','SC4-WS-06'],type:'mcq',question:item.question,choices:item.choices,answer:item.answer,explanation:item.explanation});});
+
+  var longQuestions = [
+    {question:'Explain how the structure of the periodic table helps scientists predict the properties of elements using groups and periods.',type:'long',keywords:['groups','periods','properties','predict','atomic number','reactive','noble gas'],minMatches:3,explanation:'The periodic table arranges elements by atomic number and groups elements with similar chemistry together, so scientists can predict properties from position.'},
+    {question:'Describe how a student planning an investigation on reactions between acids and metals would use working scientifically skills.',type:'long',keywords:['plan','hypothesis','acid','metal','reaction','evidence','observe','procedure'],minMatches:3,explanation:'A student uses working scientifically skills to plan the experiment, predict outcomes, observe reactions, and explain results using evidence.'},
+    {question:'Explain why elements in the same group have similar properties and why properties change across a period.',type:'long',keywords:['group','period','similar','properties','outer shell','reactivity','trend'],minMatches:3,explanation:'Elements in a group share outer-shell structure, so they behave similarly, while properties vary across a period as electron shells fill.'}
+  ];
+  longQuestions.forEach(function(item){ bank.push({topic:'Periodic table',outcomes:['SC4-PRT-01'],type:item.type,question:item.question,keywords:item.keywords,minMatches:item.minMatches,explanation:item.explanation});});
+
+  var shortQuestions = [
+    {question:'Describe in one sentence how a student could tell whether a change is chemical or physical.',type:'short',keywords:['chemical','new substance','physical','state','shape'],minMatches:2,explanation:'A chemical change makes a new substance and often shows gas, colour change, or a precipitate, while a physical change only alters shape or state without creating a new substance.'},
+    {question:'Explain why sodium and potassium are more reactive than calcium.',type:'short',keywords:['alkali','outer shell','electron','lose','easily'],minMatches:2,explanation:'Sodium and potassium are alkali metals with one electron in their outer shell, so they lose that electron more easily than calcium, making them more reactive.'},
+    {question:'A student observes a clear solution become cloudy after mixing two liquids. What does this tell you happened?',type:'short',keywords:['precipitate','solid','insoluble','chemical','cloudy'],minMatches:2,explanation:'It suggests a chemical reaction produced an insoluble solid, called a precipitate, which makes the mixture cloudy.'},
+    {question:'Write a short explanation of what an independent variable is in a scientific investigation.',type:'short',keywords:['changed','deliberately','intentionally','independent','variable'],minMatches:1,explanation:'The independent variable is the one factor that is changed deliberately to see how it affects the outcome.'},
+    {question:'In your own words, describe why repeating trials makes results more reliable.',type:'short',keywords:['repeat','reliability','random error','confirm','consistent'],minMatches:2,explanation:'Repeating trials reduces the effect of random error and helps confirm that the pattern is real, not just a one-off result.'}
+  ];
+  shortQuestions.forEach(function(item){ bank.push({topic:'Working science',outcomes:['SC4-WS-05','SC4-WS-06'],type:'short',question:item.question,explanation:item.explanation});});
 
   return bank;
 }
@@ -325,10 +372,16 @@ function renderCurrentQuestion(){
   var feedbackHtml='';
 
   if(answered){
-    var wasCorrect = item.type==='mcq' ? item._selected===item.answer : true;
-    var message = item.type==='mcq' ? (wasCorrect ? 'Correct! ' : 'Not quite. ') : '';
+    var wasCorrect = item.type==='mcq' ? item._selected===item.answer : item._correct;
+    var message = item.type==='mcq'
+      ? (wasCorrect ? 'Correct! ' : 'Not quite. ')
+      : (wasCorrect ? 'Good work! ' : 'Not quite. ');
     feedbackHtml = '<div class="feedback '+(wasCorrect?'positive':'negative')+'">'+message+item.explanation+'</div>';
   }
+
+  var apiStatusClass = (ollamaAvailable || apiKeyValid) ? 'green' : 'red';
+  var apiStatusTitle = ollamaAvailable ? 'Ollama AI ready (local)' : (apiKeyValid ? 'OpenAI API ready' : 'No AI grading available');
+  var aiDot = '<span class="ai-dot '+apiStatusClass+'" title="'+apiStatusTitle+'"></span>';
 
   var choicesHtml='';
   if(item.type==='mcq'){
@@ -337,10 +390,21 @@ function renderCurrentQuestion(){
       return '<button class="'+classes+'" '+((answered)?'disabled':'onclick="submitAnswer('+index+')"')+'><span class="option-letter">'+String.fromCharCode(65+index)+'</span>'+choice+'</button>';
     }).join('')+'</div>';
   } else {
-    choicesHtml='<p class="question-detail">Write your answer, then press Submit.</p><textarea id="shortReply" class="short-answer" rows="5" placeholder="Your answer"></textarea><div class="controls"><button class="btn primary" onclick="submitShort()">Submit</button></div>';
+    var promptText = item.type === 'long'
+      ? 'Write your answer, then press Submit.'
+      : 'Write your answer, then press Submit.';
+    var textAreaClass = 'short-answer' + (item.type === 'long' ? ' long-answer' : '');
+
     if(answered){
-      choicesHtml += '<div class="feedback positive">Nice work — compare your answer with the model response below.</div>' +
+      choicesHtml = '<p class="question-detail">You answered:</p>' +
+        '<textarea id="shortReply" class="'+textAreaClass+'" rows="5" disabled>'+escapeHtml(item._selected)+'</textarea>' +
+        '<div class="feedback positive">Nice work - compare your answer with the model response below.</div>' +
         '<div class="feedback" style="margin-top:12px;border-color:var(--line);background:#fff;">'+item.explanation+'</div>';
+      if(item._aiFeedback){
+        choicesHtml += '<div class="feedback" style="margin-top:12px;border-color:var(--line);background:#fff;">AI feedback: '+escapeHtml(item._aiFeedback)+'</div>';
+      }
+    } else {
+      choicesHtml = '<p class="question-detail">'+promptText+'</p><textarea id="shortReply" class="'+textAreaClass+'" rows="8" placeholder="Your answer"></textarea><div class="controls"><button class="btn primary" onclick="submitShort()">Submit</button></div>';
     }
   }
 
@@ -350,12 +414,16 @@ function renderCurrentQuestion(){
   card.innerHTML =
     '<div class="question-meta">' +
       '<span>'+item.topic+'</span>' +
-      '<span>Question '+questionCount+'</span>' +
+      '<span>Question '+questionCount+' '+aiDot+'</span>' +
     '</div>' +
     '<div class="question-text">'+item.question+'</div>' +
     choicesHtml +
     feedbackHtml +
     '<div class="controls">'+navButtons+'</div>';
+}
+
+function escapeHtml(str){
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 
 function submitAnswer(choiceIndex){
@@ -378,6 +446,16 @@ function submitAnswer(choiceIndex){
   }
 }
 
+function evaluateShortAnswer(text,item){
+  if(!item.keywords || !item.keywords.length) return false;
+  var normalized=text.toLowerCase();
+  var matchCount=item.keywords.reduce(function(count,keyword){
+    return count + (normalized.indexOf(keyword) !== -1 ? 1 : 0);
+  },0);
+  var threshold = item.minMatches || Math.max(1, Math.ceil(item.keywords.length / 2));
+  return matchCount >= threshold;
+}
+
 function submitShort(){
   if(answeredLast) return;
   var text=$('shortReply').value.trim();
@@ -386,8 +464,34 @@ function submitShort(){
   item._selected=text;
   answeredLast=true;
   totals.answered++;
-  renderCurrentQuestion();
-  updateProgress();
+  // Try AI grading: Ollama first (free, local), then OpenAI (if API key available)
+  var tryAI = ollamaAvailable || OPENAI_API_KEY_PLAINTEXT || ENCRYPTED_OPENAI_KEY;
+  if(tryAI){
+    var gradeFunc = ollamaAvailable ? gradeWithOllama : clientGradeWithOpenAI;
+    gradeFunc(text, item.explanation || item.question)
+      .then(function(result){
+        item._correct = !!(result && result.score);
+        item._aiFeedback = result && result.explanation ? result.explanation : '';
+        item._aiUsed = true;
+        if(item._correct) totals.correct++;
+        renderCurrentQuestion();
+        updateProgress();
+      })
+      .catch(function(err){
+        console.log('AI grading failed: '+err.message+", using local grading");
+        item._correct = evaluateShortAnswer(text,item);
+        item._aiUsed = false;
+        if(item._correct) totals.correct++;
+        renderCurrentQuestion();
+        updateProgress();
+      });
+  } else {
+    item._correct = evaluateShortAnswer(text,item);
+    item._aiUsed = false;
+    if(item._correct) totals.correct++;
+    renderCurrentQuestion();
+    updateProgress();
+  }
 }
 
 function nextQuestion(){
@@ -404,7 +508,11 @@ function updateProgress(){
   $('scoreLabel').textContent = totals.answered + ' answered';
 }
 
-window.addEventListener('DOMContentLoaded', function(){
+window.addEventListener('DOMContentLoaded', async function(){
+  ollamaAvailable = await checkOllamaAvailable();
+  if(!ollamaAvailable){
+    apiKeyValid = await validateOpenAIKey();
+  }
   startQuiz();
   enhancePeriodicTable();
 });
