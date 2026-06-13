@@ -28,8 +28,42 @@
       <section class="quiz-shell">
         <div class="question-card" id="questionCard"></div>
       </section>
+      <section class="periodic-panel" aria-labelledby="periodicTitle">
+        <button class="periodic-toggle" id="periodicToggle" type="button" aria-expanded="false" aria-controls="periodicContent">
+          <div>
+            <h2 id="periodicTitle">Interactive Periodic Table</h2>
+            <p>Click to show conductivity, mass, proton number and other element properties.</p>
+          </div>
+          <span class="periodic-toggle-icon" aria-hidden="true">+</span>
+        </button>
+        <div class="periodic-content collapsed" id="periodicContent">
+        <div class="periodic-head">
+          <div class="periodic-legend" aria-label="Element category legend">
+            <span><i class="legend-dot metal"></i>Metal</span>
+            <span><i class="legend-dot metalloid"></i>Metalloid</span>
+            <span><i class="legend-dot nonmetal"></i>Non-metal</span>
+            <span><i class="legend-dot noble"></i>Noble gas</span>
+          </div>
+        </div>
+        <div class="property-tabs" aria-label="Periodic table property view">
+          <button class="property-tab active" data-property="conductivity" type="button">Conductivity</button>
+          <button class="property-tab" data-property="mass" type="button">Mass</button>
+          <button class="property-tab" data-property="protons" type="button">Protons</button>
+          <button class="property-tab" data-property="state" type="button">State</button>
+          <button class="property-tab" data-property="shells" type="button">Shells</button>
+          <button class="property-tab" data-property="uses" type="button">Uses</button>
+        </div>
+        <div class="periodic-layout">
+          <div class="periodic-scroll">
+            <div class="periodic-table" id="periodicTable"></div>
+          </div>
+          <aside class="element-details" id="elementDetails"></aside>
+        </div>
+        </div>
+      </section>
     </div>
   </main>
+  <script src="https://js.puter.com/v2/"></script>
   <script defer src="script.js"></script>
 </body>
 </html>
