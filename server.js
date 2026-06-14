@@ -169,10 +169,41 @@ async function markWithFreeAI(payload){
   return normaliseMark(extractJson(text), maxMark);
 }
 
+async function markWithFreeTextAI(payload){
+  const maxMark = payload.type === 'long' ? 5 : 3;
+  const prompt = [
+    'Return only JSON. You are a fair but strict Year 8 Science teacher marking a student answer.',
+    'Question: ' + (payload.question || ''),
+    'Expected answer: ' + (payload.guidance || ''),
+    'Keywords: ' + ((payload.keywords || []).join(', ') || '-'),
+    'Student answer: ' + (payload.answer || ''),
+    'Mark out of ' + maxMark + '. Do not give full marks for one-word or vague answers.',
+    'Return exactly {"score":0,"mark":1,"maxMark":' + maxMark + ',"explanation":"two short feedback sentences"}'
+  ].join('\n\n');
+  const response = await fetch('https://text.pollinations.ai/' + encodeURIComponent(prompt), {
+    method: 'GET',
+    headers: {'Accept': 'text/plain'}
+  });
+  if(!response.ok){
+    const detail = await response.text();
+    throw new Error('Free text AI error ' + response.status + ': ' + detail.slice(0, 160));
+  }
+  const text = await response.text();
+  return normaliseMark(extractJson(text), maxMark);
+}
+
 async function markWithBestHostedAI(payload){
   try{
     if(GEMINI_API_KEY) return markWithGemini(payload);
-    return markWithFreeAI(payload);
+    try{
+      return await markWithFreeAI(payload);
+    }catch(firstErr){
+      try{
+        return await markWithFreeTextAI(payload);
+      }catch(secondErr){
+        throw new Error(firstErr.message + ' | ' + secondErr.message);
+      }
+    }
   }catch(err){
     return markWithLocalFallback(payload, err.message);
   }

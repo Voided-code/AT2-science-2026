@@ -1212,6 +1212,7 @@ function resetQuestionState(item){
   delete item._mark;
   delete item._maxMark;
   delete item._aiFeedback;
+  delete item._feedbackLabel;
   delete item._aiUsed;
   delete item._choicesShuffled;
 }
@@ -1326,7 +1327,7 @@ function renderCurrentQuestion(){
         choicesHtml += '<div class="mark-chip '+markClass+'">Mark: '+displayMark+'/'+displayMaxMark+'</div>';
       }
       if(item._aiFeedback){
-        choicesHtml += '<div class="feedback '+(item._correct?'positive':'negative')+'" style="margin-top:12px;">AI feedback: '+escapeHtml(item._aiFeedback)+'</div>';
+        choicesHtml += '<div class="feedback '+(item._correct?'positive':'negative')+'" style="margin-top:12px;">'+escapeHtml(item._feedbackLabel || 'AI feedback')+': '+escapeHtml(item._aiFeedback)+'</div>';
       }
     } else {
       choicesHtml = '<p class="question-detail">'+promptText+'</p><textarea id="shortReply" class="'+textAreaClass+'" rows="8" placeholder="Your answer"></textarea><div class="controls"><button class="btn primary" id="submitShortBtn" onclick="submitShort()">Submit</button></div>';
@@ -2457,6 +2458,7 @@ function submitShort(){
     item._maxMark = maxMarkForItem(item);
     item._mark = 0;
     item._aiUsed = true;
+    item._feedbackLabel = 'Backup feedback';
     item._aiFeedback = 'Mini marker: this mostly repeats the question rather than answering it. Add the science idea from the model answer and explain why it answers the question.';
     lastAiProvider = 'Copy check';
     renderCurrentQuestion();
@@ -2470,6 +2472,7 @@ function submitShort(){
       item._mark = gradeMark.mark;
       item._maxMark = gradeMark.maxMark;
       item._aiUsed = !!(result && result._aiProvider);
+      item._feedbackLabel = result && result.fallback ? 'Backup feedback' : 'AI feedback';
       item._aiFeedback = item._aiUsed && result && result.explanation ? result.explanation : '';
       if(item._correct) totals.correct++;
       renderCurrentQuestion();
@@ -2483,6 +2486,7 @@ function submitShort(){
         item._mark = gradeMark.mark;
         item._maxMark = gradeMark.maxMark;
         item._aiFeedback = result && result.explanation ? result.explanation : '';
+        item._feedbackLabel = result && result.fallback ? 'Backup feedback' : 'Mini Marker feedback';
         item._aiUsed = true;
         if(item._correct) totals.correct++;
         renderCurrentQuestion();
@@ -2706,6 +2710,7 @@ function forceMiniMarkerForCurrent(){
     item._mark = gradeMark.mark;
     item._maxMark = gradeMark.maxMark;
     item._aiUsed = true;
+    item._feedbackLabel = 'Mini Marker feedback';
     item._aiFeedback = result.explanation;
     lastAiProvider = 'Mini marker';
     renderCurrentQuestion();
