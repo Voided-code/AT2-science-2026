@@ -59,7 +59,7 @@ function normaliseMark(result, maxMark){
     score: mark >= Math.ceil(maxMark * 0.6) ? 1 : 0,
     mark,
     maxMark,
-    explanation: String(result.explanation || 'Marked by AI.').slice(0, 420)
+    explanation: String(result.explanation || 'Marked by AI.').slice(0, 600)
   };
 }
 
@@ -144,7 +144,7 @@ async function markWithGroq(payload){
     'Student answer: ' + (payload.answer || ''),
     'Mark out of ' + maxMark + '. Award partial marks. Do not give full marks for one-word or vague answers.',
     'Score is 1 only if the answer earns at least 60% of the marks.',
-    'Give feedback in two short sentences: what was right or missing, then one specific improvement.',
+    'Give feedback in exactly 2 short sentences (under 40 words total): what was right or missing, then one specific improvement.',
     'Return only JSON exactly like {"score":0,"mark":1,"maxMark":' + maxMark + ',"explanation":"feedback"}'
   ].join('\n\n');
 
@@ -154,11 +154,11 @@ async function markWithGroq(payload){
     body: JSON.stringify({
       model: GROQ_MODEL,
       messages: [
-        {role: 'system', content: 'Return only JSON. Be strict but fair for a Year 8 Science answer.'},
+        {role: 'system', content: 'Return only JSON. Be strict but fair for a Year 8 Science answer. Keep explanation under 40 words.'},
         {role: 'user', content: prompt}
       ],
       temperature: 0,
-      max_tokens: 350
+      max_tokens: 500
     })
   });
   if(!response.ok){
