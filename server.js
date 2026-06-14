@@ -134,7 +134,12 @@ async function markWithGemini(payload){
 
 async function markWithGroq(payload){
   if(!GROQ_API_KEY) throw new Error('GROQ_API_KEY is not set');
-  const maxMark = payload.type === 'long' ? 5 : 3;
+  const isLong = payload.type === 'long';
+  const maxMark = isLong ? 5 : 3;
+  const feedbackGuide = isLong
+    ? 'Give feedback in 3-4 sentences (around 80-100 words): what was right, what was missing, one specific improvement, and one science idea to include next time.'
+    : 'Give feedback in 2 sentences (around 50-60 words): what was right or missing, then one specific improvement.';
+  const maxTokens = isLong ? 900 : 450;
   const prompt = [
     'You are a fair but strict Year 8 Science teacher marking a student answer.',
     'Topic: elements, compounds, properties, atomic structure, investigations, data trends, and the periodic table.',
@@ -144,7 +149,7 @@ async function markWithGroq(payload){
     'Student answer: ' + (payload.answer || ''),
     'Mark out of ' + maxMark + '. Award partial marks. Do not give full marks for one-word or vague answers.',
     'Score is 1 only if the answer earns at least 60% of the marks.',
-    'Give feedback in exactly 2 short sentences (under 40 words total): what was right or missing, then one specific improvement.',
+    feedbackGuide,
     'Return only JSON exactly like {"score":0,"mark":1,"maxMark":' + maxMark + ',"explanation":"feedback"}'
   ].join('\n\n');
 
@@ -154,11 +159,11 @@ async function markWithGroq(payload){
     body: JSON.stringify({
       model: GROQ_MODEL,
       messages: [
-        {role: 'system', content: 'Return only JSON. Be strict but fair for a Year 8 Science answer. Keep explanation under 40 words.'},
+        {role: 'system', content: 'Return only JSON. Be strict but fair for a Year 8 Science answer.'},
         {role: 'user', content: prompt}
       ],
       temperature: 0,
-      max_tokens: 500
+      max_tokens: maxTokens
     })
   });
   if(!response.ok){
