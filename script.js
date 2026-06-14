@@ -243,7 +243,11 @@ var miniMarkerAvailable = true;
 var HF_MODEL_ENDPOINT = 'https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.1';
 var hfAvailable = true; // always try unless rate limited
 var POLLINATIONS_ENDPOINT = 'https://text.pollinations.ai/openai';
-var pollinationsAvailable = true;
+var pollinationsAvailable = false;
+var aiStartupChecking = true;
+var BACKEND_AI_ENDPOINT = '/api/mark';
+var BACKEND_HEALTH_ENDPOINT = '/api/health';
+var backendAiAvailable = false;
 
 // 4. OPENAI (optional, if you have credits)
 var OPENAI_API_KEY_PLAINTEXT = ''; // paste your OpenAI key here if you have credits
@@ -285,7 +289,7 @@ async function decryptOpenAIKey(encJsonString, passphrase){
 
 // Grade using local Ollama
 async function gradeWithOllama(answer, guidance){
-  const prompt = `You are a Year 8 Science teacher grading student answers.\n\n${assessmentContext}\n\nExpected guidance: ${guidance}\n\nStudent answer: ${answer}\n\nGrade this answer as either correct (1) or incorrect (0). Give helpful teaching feedback: say what was right or missing, then give one specific way to improve the answer. Keep it to 2 short sentences.\nRespond ONLY with valid JSON in this exact format:\n{"score": 0 or 1, "explanation": "2 short instructive sentences"}\n\nJSON:`;
+  const prompt = `You are a Year 8 Science teacher grading student answers.\n\n${assessmentContext}\n\nExpected guidance: ${guidance}\n\nStudent answer: ${answer}\n\nGive a mark out of 3 for normal short answers, or out of 5 for extended explanations. One-word answers can receive small credit for one useful idea, but cannot receive full marks. Score is 1 only when the answer earns at least 60% of the marks. Give helpful teaching feedback: say what was right or missing, then give one specific way to improve the answer. Keep it to 2 short sentences.\nRespond ONLY with valid JSON in this exact format:\n{"score": 0 or 1, "mark": 0, "maxMark": 3, "explanation": "2 short instructive sentences"}\n\nJSON:`;
   
   const res = await fetch(OLLAMA_ENDPOINT, {
     method: 'POST',
@@ -316,15 +320,59 @@ function checkPuterAiAvailable(){
   return !!(window.puter && window.puter.ai && typeof window.puter.ai.chat === 'function');
 }
 
+async function checkBackendAiAvailable(){
+  try{
+    var res = await withTimeout(fetch(BACKEND_HEALTH_ENDPOINT, {method:'GET'}), 3500);
+    if(!res.ok) return false;
+    var data = await res.json();
+    return !!(data && data.ok);
+  }catch(e){
+    return false;
+  }
+}
+
+async function gradeWithBackendAI(answer,item){
+  var maxMark = maxMarkForItem(item);
+  var res = await withTimeout(fetch(BACKEND_AI_ENDPOINT, {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({
+      answer: answer,
+      question: item.question,
+      guidance: item.explanation || '',
+      keywords: item.keywords || [],
+      type: item.type,
+      maxMark: maxMark
+    })
+  }), 12000);
+  if(!res.ok){
+    var detail = await res.text();
+    throw new Error('Backend AI error '+res.status+': '+detail.slice(0, 120));
+  }
+  return res.json();
+}
+
+async function checkPuterAiUsable(){
+  if(!checkPuterAiAvailable()) return false;
+  try{
+    var response = await withTimeout(window.puter.ai.chat('Reply only with OK if AI is available.', {model: 'gpt-4o-mini'}), 5500);
+    return String(typeof response === 'string' ? response : JSON.stringify(response || '')).length > 0;
+  }catch(e){
+    return false;
+  }
+}
+
 async function gradeWithPuterAI(answer, guidance){
   if(!checkPuterAiAvailable()) throw new Error('Puter AI is not loaded');
   var prompt = 'You are a Year 8 Science teacher grading a quiz answer.\n\n' +
     assessmentContext + '\n\n' +
     'Expected guidance: ' + guidance + '\n\n' +
     'Student answer: ' + answer + '\n\n' +
-    'Mark the answer correct if it shows the same scientific idea, even if the wording is different.\n' +
+    'Give a mark out of 3 for normal short answers, or out of 5 for extended explanations.\n' +
+    'One-word answers can receive small credit for one useful idea, but cannot receive full marks.\n' +
+    'Mark score as 1 only if the answer earns at least 60% of the marks and shows the same scientific idea, even if the wording is different.\n' +
     'Give helpful teaching feedback: say what was right or missing, then give one specific way to improve the answer. Keep it to 2 short sentences.\n' +
-    'Return ONLY valid JSON in this format: {"score":0,"explanation":"2 short instructive sentences"}';
+    'Return ONLY valid JSON in this format: {"score":0,"mark":0,"maxMark":3,"explanation":"2 short instructive sentences"}';
   var response = await window.puter.ai.chat(prompt, {model: 'gpt-4o-mini'});
   var txt = typeof response === 'string' ? response : (response && response.message && response.message.content) || String(response || '');
   txt = txt.trim().replace(/^```json\s*/i,'').replace(/^```\s*/,'').replace(/\s*```$/,'');
@@ -335,17 +383,38 @@ async function gradeWithPuterAI(answer, guidance){
   }
 }
 
+async function checkPollinationsAvailable(){
+  try{
+    var res = await withTimeout(fetch(POLLINATIONS_ENDPOINT, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({
+        model: 'openai',
+        messages: [{role:'user', content:'Reply only with OK.'}],
+        temperature: 0,
+        max_tokens: 5
+      })
+    }), 5500);
+    if(!res.ok) return false;
+    var data = await res.json();
+    var txt = data && data.choices && data.choices[0] && data.choices[0].message ? data.choices[0].message.content : '';
+    return /ok/i.test(String(txt || '')) || !!txt;
+  }catch(e){
+    return false;
+  }
+}
+
 async function gradeWithPollinationsAI(answer, guidance){
   var body = {
     model: 'openai',
     messages: [
       {
         role: 'system',
-        content: 'You are a Year 8 Science teacher. Return only JSON: {"score":0|1,"explanation":"2 short instructive sentences"}.'
+        content: 'You are a Year 8 Science teacher. Return only JSON: {"score":0|1,"mark":0,"maxMark":3,"explanation":"2 short instructive sentences"}. Give marks out of 3, or out of 5 for extended explanations. One-word answers cannot receive full marks.'
       },
       {
         role: 'user',
-        content: assessmentContext + '\n\nExpected guidance: ' + guidance + '\n\nStudent answer: ' + answer + '\n\nMark correct if the same science idea is shown. Explain what was right or missing and give one specific improvement.'
+        content: assessmentContext + '\n\nExpected guidance: ' + guidance + '\n\nStudent answer: ' + answer + '\n\nGive a mark. Score is 1 only if the answer earns at least 60% and shows the same science idea. Explain what was right or missing and give one specific improvement.'
       }
     ],
     temperature: 0,
@@ -396,12 +465,13 @@ async function gradeWithBrowserAI(answer, guidance){
   var model = getBrowserLanguageModel();
   if(!model) throw new Error('Browser AI is not available');
 
-  var prompt = 'You are a Year 8 Science teacher. Grade the student answer as correct or incorrect.\n\n' +
+  var prompt = 'You are a Year 8 Science teacher. Grade the student answer with a mark.\n\n' +
     assessmentContext + '\n\n' +
     'Expected guidance: ' + guidance + '\n\n' +
     'Student answer: ' + answer + '\n\n' +
+    'Give a mark out of 3 for normal short answers, or out of 5 for extended explanations. One-word answers cannot receive full marks. Score is 1 only when the answer earns at least 60%.\n' +
     'Give helpful teaching feedback: say what was right or missing, then give one specific way to improve the answer. Keep it to 2 short sentences.\n' +
-    'Return only JSON like {"score":1,"explanation":"2 short instructive sentences"}';
+    'Return only JSON like {"score":1,"mark":2,"maxMark":3,"explanation":"2 short instructive sentences"}';
 
   var session = null;
   if(model.create){
@@ -435,8 +505,8 @@ async function clientGradeWithOpenAI(answer, guidance){
   const body = {
     model: 'gpt-3.5-turbo',
     messages: [
-      { role: 'system', content: 'You are a Year 8 Science teacher. Return JSON: {"score":0|1, "explanation":"2 short instructive sentences"}. Explain what was right or missing and give one specific improvement.' },
-      { role: 'user', content: `${assessmentContext}\n\nGuidance: ${guidance}\n\nStudent answer: ${answer}\n\nMark correct if the same science idea is shown and it fits the assessed outcomes. Return only valid JSON.` }
+      { role: 'system', content: 'You are a Year 8 Science teacher. Return JSON: {"score":0|1, "mark":0, "maxMark":3, "explanation":"2 short instructive sentences"}. Give marks out of 3, or out of 5 for extended explanations. One-word answers cannot receive full marks.' },
+      { role: 'user', content: `${assessmentContext}\n\nGuidance: ${guidance}\n\nStudent answer: ${answer}\n\nGive a mark. Score is 1 only if the answer earns at least 60% and shows the same science idea. Return only valid JSON.` }
     ],
     max_tokens: 200,
     temperature: 0
@@ -644,14 +714,14 @@ function buildQuestionBank(){
   working.forEach(function(item){ bank.push({topic:'Working science',outcomes:['SC5-WS-01','SC4-WS-02','SC4-WS-04','SC4-WS-05','SC4-WS-06'],type:'mcq',question:item.question,choices:item.choices,answer:item.answer,explanation:item.explanation});});
 
   var longQuestions = [
-    {question:'Explain how the structure of the periodic table helps scientists predict the properties of elements using groups and periods.',type:'long',keywords:['groups','periods','properties','predict','atomic number','reactive','noble gas'],minMatches:3,explanation:'The periodic table arranges elements by atomic number and groups elements with similar chemistry together, so scientists can predict properties from position.'},
-    {question:'Describe how a student planning an investigation on reactions between acids and metals would use working scientifically skills.',type:'long',keywords:['plan','hypothesis','acid','metal','reaction','evidence','observe','procedure'],minMatches:3,explanation:'A student uses working scientifically skills to plan the experiment, predict outcomes, observe reactions, and explain results using evidence.'},
-    {question:'Explain why elements in the same group have similar properties and why properties change across a period.',type:'long',keywords:['group','period','similar','properties','outer shell','reactivity','trend'],minMatches:3,explanation:'Elements in a group share outer-shell structure, so they behave similarly, while properties vary across a period as electron shells fill.'},
-    {question:'A student says copper is used for electrical wiring only because it is cheap. Do you agree? Explain which property makes copper suitable and why that property matters.',type:'long',keywords:['copper','conductivity','electrical','wiring','property','use','because'],minMatches:3,explanation:'Copper is suitable for electrical wiring mainly because it conducts electricity very well. Cost may matter, but the key scientific property is conductivity, which lets electrical energy move through the wire efficiently.'},
+    {question:'Explain how the structure of the periodic table helps scientists predict the properties of elements using groups and periods. Write about 4-5 sentences and include an example.',type:'long',keywords:['groups','periods','properties','predict','atomic number','reactive','noble gas'],minMatches:3,explanation:'The periodic table arranges elements by atomic number and groups elements with similar chemistry together, so scientists can predict properties from position. Groups show similar outer-shell patterns and reactivity, while periods show changes across rows.'},
+    {question:'Describe how a student planning an investigation on reactions between acids and metals would use working scientifically skills. Write about 4-5 sentences covering prediction, variables, safety, observations and conclusion.',type:'long',keywords:['plan','hypothesis','acid','metal','reaction','evidence','observe','procedure'],minMatches:3,explanation:'A student uses working scientifically skills to plan the experiment, predict outcomes, control variables, follow a safe procedure, observe reactions, collect evidence, and explain results using that evidence.'},
+    {question:'Explain why elements in the same group have similar properties and why properties change across a period. Write about 4-5 sentences and connect your answer to electron shells.',type:'long',keywords:['group','period','similar','properties','outer shell','reactivity','trend'],minMatches:3,explanation:'Elements in a group share outer-shell structure, so they behave similarly. Properties vary across a period as atomic number increases and electron shells fill, which changes patterns such as reactivity.'},
+    {question:'A student says copper is used for electrical wiring only because it is cheap. Do you agree? Write about 4-5 sentences explaining which property makes copper suitable, why that property matters, and one other factor that could affect its use.',type:'long',keywords:['copper','conductivity','electrical','wiring','property','use','because'],minMatches:3,explanation:'Copper is suitable for electrical wiring mainly because it conducts electricity very well. Cost may matter, but the key scientific property is conductivity, which lets electrical energy move through the wire efficiently. Other factors can include flexibility, availability and corrosion resistance.'},
     {question:'A student tests four unknown solids and records whether they are shiny, brittle, malleable and conductive. How could the student use these observations to decide which samples are metals, non-metals or metalloids? Explain why.',type:'long',keywords:['shiny','brittle','malleable','conductive','metal','non-metal','metalloid','observations'],minMatches:4,explanation:'The student can compare the observations with known properties. Metals are usually shiny, malleable and conductive, non-metals are often brittle and poor conductors, and metalloids can show mixed properties such as limited conductivity.'},
-    {question:'A graph shows that one metal produces bubbles much faster than another when placed in acid. What conclusion could you draw, and why is the graph useful evidence?',type:'long',keywords:['graph','bubbles','metal','acid','reaction speed','data','trend','conclusion','evidence'],minMatches:4,explanation:'The graph can show which metal reacts faster by comparing the rate of bubble production. It is useful evidence because the data reveals a trend or pattern, allowing a conclusion about relative reactivity.'},
-    {question:'How did new evidence and technology help scientists improve models of atomic structure over time? Give at least one example and explain why the model changed.',type:'long',keywords:['evidence','technology','model','atomic structure','electron','nucleus','neutron','changed'],minMatches:4,explanation:'Atomic models changed when new evidence became available. For example, cathode ray experiments supported the electron, gold foil evidence supported the nucleus, and later experiments supported the neutron, so scientists updated models to better match observations.'},
-    {question:'An atom has 11 protons. Explain what this tells you about the element, its atomic number and the number of electrons if the atom is neutral.',type:'long',keywords:['11','protons','atomic number','sodium','electrons','neutral'],minMatches:3,explanation:'An atom with 11 protons has atomic number 11, so it is sodium. If it is neutral, it has 11 electrons because neutral atoms have equal numbers of protons and electrons.'}
+    {question:'A graph shows that one metal produces bubbles much faster than another when placed in acid. Write about 4-5 sentences explaining what conclusion you could draw, why the graph is useful evidence, and how repeated data would make the conclusion stronger.',type:'long',keywords:['graph','bubbles','metal','acid','reaction speed','data','trend','conclusion','evidence'],minMatches:4,explanation:'The graph can show which metal reacts faster by comparing the rate of bubble production. It is useful evidence because the data reveals a trend or pattern, allowing a conclusion about relative reactivity. Repeated trials can make the conclusion more reliable.'},
+    {question:'How did new evidence and technology help scientists improve models of atomic structure over time? Write about 4-5 sentences, give at least one example, and explain why the model changed.',type:'long',keywords:['evidence','technology','model','atomic structure','electron','nucleus','neutron','changed'],minMatches:4,explanation:'Atomic models changed when new evidence became available. For example, cathode ray experiments supported the electron, gold foil evidence supported the nucleus, and later experiments supported the neutron, so scientists updated models to better match observations.'},
+    {question:'An atom has 11 protons. Write about 4-5 sentences explaining what this tells you about the element, its atomic number, its electrons if neutral, and how you could model its atomic structure.',type:'long',keywords:['11','protons','atomic number','sodium','electrons','neutral'],minMatches:3,explanation:'An atom with 11 protons has atomic number 11, so it is sodium. If it is neutral, it has 11 electrons because neutral atoms have equal numbers of protons and electrons. A simple model would place the electrons in shells around the nucleus.'}
   ];
   longQuestions.forEach(function(item){ bank.push({topic:'Periodic table',outcomes:['SC4-PRT-01'],type:item.type,question:item.question,keywords:item.keywords,minMatches:item.minMatches,explanation:item.explanation});});
 
@@ -663,6 +733,39 @@ function buildQuestionBank(){
     {question:'In your own words, describe why repeating trials makes results more reliable.',type:'short',keywords:['repeat','reliability','random error','confirm','consistent'],minMatches:2,explanation:'Repeating trials reduces the effect of random error and helps confirm that the pattern is real, not just a one-off result.'}
   ];
   shortQuestions.forEach(function(item){ bank.push({topic:'Working science',outcomes:['SC4-WS-05','SC4-WS-06'],type:item.type,question:item.question,keywords:item.keywords,minMatches:item.minMatches,explanation:item.explanation});});
+
+  var slideQuestions = [
+    {topic:'Periodic table slides',type:'mcq',question:'When reading an element box on the periodic table, what does the atomic number tell you?',choices:['The number of protons','The number of compounds','The number of molecules','The state of matter'],answer:0,explanation:'The atomic number is the number of protons in the atom, and it determines the element.'},
+    {topic:'Periodic table slides',type:'mcq',question:'What does the mass number of an atom represent?',choices:['Protons plus neutrons','Electrons only','Valence electrons only','Groups plus periods'],answer:0,explanation:'Mass number is the total number of protons and neutrons in the nucleus.'},
+    {topic:'Periodic table slides',type:'mcq',question:'What do horizontal periods on the periodic table represent in atomic structure?',choices:['The number of electron shells','The number of valence electrons','Only the number of neutrons','The metal reactivity series'],answer:0,explanation:'Atoms in the same period have the same number of electron shells.'},
+    {topic:'Periodic table slides',type:'mcq',question:'Why do elements in the same vertical group often have similar chemical properties?',choices:['They have the same number of valence electrons','They have the same mass number','They are all gases','They all have no electrons'],answer:0,explanation:'Elements in a group have the same number of outer-shell electrons, so they often react in similar ways.'},
+    {topic:'Periodic table slides',type:'mcq',question:'Why are Group 18 noble gases described as inert or very unreactive?',choices:['Their outer electron shell is full','They have no protons','They are all metals','Their atoms are destroyed easily'],answer:0,explanation:'Noble gases already have full outer electron shells, making them very unreactive.'},
+    {topic:'Periodic table slides',type:'short',question:'Explain why periods and groups are both useful when predicting an element’s properties. Give 1-2 sentences.',keywords:['period','group','shells','valence','properties','predict'],minMatches:3,explanation:'Periods show the number of electron shells, while groups show the number of valence electrons. Together, these patterns help predict properties and reactivity.'},
+    {topic:'Periodic table slides',type:'long',question:'Use the class slides to explain how groups, periods and valence electrons help scientists predict element properties. Write about 4-5 sentences and include noble gases or halogens as an example.',keywords:['groups','periods','valence electrons','shells','properties','predict','noble gases','halogens'],minMatches:4,explanation:'Groups contain elements with the same number of valence electrons, so they have similar chemical properties. Periods show the number of electron shells. Group 17 halogens react similarly because they have seven outer electrons, while Group 18 noble gases are unreactive because their outer shells are full.'},
+    {topic:'Materials slides',type:'mcq',question:'Where are metals, non-metals and semi-metals generally found on the periodic table?',choices:['Metals left, non-metals right, semi-metals between them','Metals right, non-metals left, semi-metals nowhere','All metals are in Group 18','Only non-metals are on the periodic table'],answer:0,explanation:'Metals are generally on the left, non-metals on the right, and semi-metals sit between them.'},
+    {topic:'Materials slides',type:'short',question:'Describe two differences between the properties of metals and non-metals. Give 1-2 sentences.',keywords:['metal','non-metal','conductors','malleable','ductile','brittle','shiny','dull'],minMatches:3,explanation:'Metals are usually shiny, malleable, ductile and good conductors of heat and electricity. Non-metals are often dull, brittle and poor conductors.'},
+    {topic:'Materials slides',type:'long',question:'A student has an unknown solid that is shiny, can be flattened into a sheet, and conducts electricity. Use the class slides to explain how you would classify it and why. Write about 4-5 sentences.',keywords:['metal','shiny','malleable','conducts','electricity','non-metal','semi-metal','properties'],minMatches:4,explanation:'The solid is most likely a metal because metals are usually shiny, malleable and good conductors of electricity. Non-metals are usually dull, brittle and poor conductors, while semi-metals have mixed properties.'},
+    {topic:'Metal bonding slides',type:'long',question:'Explain why metals conduct electricity using the metallic bonding model from the slides. Write about 4-5 sentences and include delocalised electrons, lattice structure and electric current.',keywords:['metals','conduct','electricity','delocalised electrons','lattice','current'],minMatches:4,explanation:'Metal atoms are packed in a regular lattice structure. Some electrons are delocalised, meaning they can move freely between metal atoms. These moving electrons create an electric current, so metals conduct electricity well.'},
+    {topic:'Matter classification slides',type:'mcq',question:'Which statement best describes an element?',choices:['A pure substance made of one type of atom only','A mixture of two substances not bonded','A molecule with many different elements only','A solution that cannot be separated'],answer:0,explanation:'An element is a pure substance made of only one type of atom.'},
+    {topic:'Matter classification slides',type:'mcq',question:'Which statement best describes a compound?',choices:['Two or more types of atoms chemically bonded together','Two substances mixed but not bonded','Only one type of atom','A physical blend like mud'],answer:0,explanation:'A compound contains two or more types of atoms chemically bonded together.'},
+    {topic:'Matter classification slides',type:'mcq',question:'Which statement best describes a mixture?',choices:['Two or more substances not chemically bonded together','One type of atom only','Atoms chemically bonded in fixed ratios','A single pure element'],answer:0,explanation:'A mixture contains substances together without chemical bonding between all parts.'},
+    {topic:'Matter classification slides',type:'short',question:'Explain the difference between an element molecule and a compound molecule. Give 1-2 sentences.',keywords:['molecule','element','compound','one type','two or more','atoms'],minMatches:3,explanation:'An element molecule is made of only one type of atom, such as O2. A compound molecule is made of two or more different types of atoms chemically bonded, such as H2O or CO2.'},
+    {topic:'Matter classification slides',type:'long',question:'Classify elements, compounds and mixtures using examples from the slides. Write about 4-5 sentences and explain how chemical bonding helps you tell the difference.',keywords:['element','compound','mixture','pure substance','chemically bonded','atoms','examples'],minMatches:4,explanation:'Elements are pure substances made of one type of atom, such as carbon or copper. Compounds are pure substances made of different atoms chemically bonded, such as water or sodium chloride. Mixtures are not pure substances and contain materials not chemically bonded together, such as sea water or mud.'},
+    {topic:'Compound naming slides',type:'short',question:'When naming a simple compound that contains a metal and a non-metal, which part of the name usually comes first? Give 1-2 sentences.',keywords:['metal','first','non-metal','ide','compound'],minMatches:2,explanation:'The metal is named first. The second element usually has its ending changed to -ide, such as sodium chloride or magnesium oxide.'},
+    {topic:'Compound naming slides',type:'long',question:'Explain the basic naming rules for compounds from the slides. Write about 4-5 sentences including metal-first naming, the -ide ending, and prefixes such as mono, di and tri for non-metal compounds.',keywords:['compound','metal','ide','prefix','mono','di','tri','non-metal'],minMatches:4,explanation:'If a compound contains a metal, the metal is named first and the second element often ends in -ide. For compounds made only of non-metals, prefixes such as mono, di and tri can show the number of atoms. Some compounds also contain polyatomic ions such as hydroxide, sulfate, nitrate or carbonate.'},
+    {topic:'History of atom slides',type:'mcq',question:'Which scientist discovered the electron using cathode ray experiments?',choices:['Thomson','Rutherford','Bohr','Chadwick'],answer:0,explanation:'Thomson used cathode ray experiments and identified negatively charged electrons.'},
+    {topic:'History of atom slides',type:'mcq',question:'Which experiment led Rutherford to propose a small, dense, positively charged nucleus?',choices:['Gold foil experiment','Cathode ray tube','Neutron scattering only','Periodic table sorting'],answer:0,explanation:'Rutherford’s gold foil experiment showed that some alpha particles bounced back, suggesting a small dense nucleus.'},
+    {topic:'History of atom slides',type:'long',question:'Explain how the atomic model changed from Thomson to Rutherford to Bohr. Write about 4-5 sentences and include the evidence or idea that caused each change.',keywords:['Thomson','Rutherford','Bohr','electron','nucleus','shells','evidence','model'],minMatches:4,explanation:'Thomson proposed the plum pudding model after discovering electrons. Rutherford used gold foil evidence to show atoms are mostly empty space with a small dense positive nucleus. Bohr then described electrons moving in set energy levels or shells around the nucleus.'},
+    {topic:'History of atom slides',type:'long',question:'Use the timeline from the atom history slides to explain why scientific models change over time. Write about 4-5 sentences using at least two scientists as examples.',keywords:['models','evidence','Democritus','Dalton','Thomson','Rutherford','Bohr','Chadwick'],minMatches:4,explanation:'Scientific models change when new evidence explains observations better. Dalton described atoms as building blocks of matter, Thomson added electrons, Rutherford added the nucleus, Bohr added electron shells, and Chadwick added neutrons in the nucleus.'},
+    {topic:'History of atom slides',type:'short',question:'What did Chadwick add to the atomic model? Give 1-2 sentences.',keywords:['Chadwick','neutron','nucleus','no charge'],minMatches:2,explanation:'Chadwick discovered the neutron. Neutrons are uncharged particles found in the nucleus.'}
+  ];
+  slideQuestions.forEach(function(item){
+    if(item.type === 'mcq'){
+      bank.push({topic:item.topic,outcomes:['SC4-PRT-01'],type:'mcq',question:item.question,choices:item.choices,answer:item.answer,explanation:item.explanation});
+    } else {
+      bank.push({topic:item.topic,outcomes:['SC4-PRT-01'],type:item.type,question:item.question,keywords:item.keywords,minMatches:item.minMatches,explanation:item.explanation});
+    }
+  });
 
   return bank;
 }
@@ -914,7 +1017,8 @@ function makeBankExpansionQuestion(serial){
   }
   if(type === 1){
     item = elementUses[serial % elementUses.length];
-    return {topic:'Materials and properties',outcomes:['SC4-PRT-01'],type:'short',generated:true,generatedId:serial,question:'Explain why '+item[0]+' is useful for '+item[2]+'.',keywords:[item[0],'properties','use','useful','because','suitable'],minMatches:2,explanation:item[0][0].toUpperCase()+item[0].slice(1)+' is useful for '+item[2]+' because '+item[3]+'.'};
+    var longUse = serial % 3 !== 0;
+    return {topic:'Materials and properties',outcomes:['SC4-PRT-01'],type:longUse?'long':'short',generated:true,generatedId:serial,question:longUse ? 'Explain why '+item[0]+' is useful for '+item[2]+'. Write about 4-5 sentences that identify the element, describe the important property, link the property to the use, and explain why a different material may be less suitable.' : 'Explain why '+item[0]+' is useful for '+item[2]+'. Give 1-2 sentences.',keywords:[item[0],'properties','use','useful','because','suitable'],minMatches:longUse?3:2,explanation:item[0][0].toUpperCase()+item[0].slice(1)+' is useful for '+item[2]+' because '+item[3]+'. A strong answer links the property to the job the material needs to do.'};
   }
   if(type === 2){
     item = particles[serial % particles.length];
@@ -934,15 +1038,20 @@ function makeBankExpansionQuestion(serial){
   }
   if(type === 6){
     item = periodic[serial % periodic.length];
-    return {topic:'Periodic table',outcomes:['SC4-PRT-01'],type:'short',generated:true,generatedId:serial,question:'Predict one property of '+item[0]+' from its position on the periodic table.',keywords:['group','period','property','predict','position','periodic table','reactivity'],minMatches:2,explanation:item[0][0].toUpperCase()+item[0].slice(1)+' can be predicted from its position: it is a '+item[4]+' in '+item[2]+' and '+item[3]+'.'};
+    var longPeriodic = serial % 4 !== 0;
+    return {topic:'Periodic table',outcomes:['SC4-PRT-01'],type:longPeriodic?'long':'short',generated:true,generatedId:serial,question:longPeriodic ? 'Predict properties of '+item[0]+' from its position on the periodic table. Write about 4-5 sentences using its group, period, element type and likely reactivity or behaviour.' : 'Predict one property of '+item[0]+' from its position on the periodic table. Give 1-2 sentences.',keywords:['group','period','property','predict','position','periodic table','reactivity'],minMatches:longPeriodic?3:2,explanation:item[0][0].toUpperCase()+item[0].slice(1)+' can be predicted from its position: it is a '+item[4]+' in '+item[2]+' and '+item[3]+'. Position helps predict properties because groups and periods show patterns.'};
   }
   if(type === 7){
     item = investigations[serial % investigations.length];
+    if(serial % 4 === 3){
+      return {topic:'Working science',outcomes:['SC4-WS-02','SC4-WS-04'],type:'long',generated:true,generatedId:serial,question:'Plan an investigation to test how '+item[0]+'. Write about 4-5 sentences including the independent variable, dependent variable, one control variable, one safety or validity step, and how you would use the results.',keywords:['independent','dependent','control','variable','valid','safe','results'],minMatches:4,explanation:'A valid plan identifies the independent variable as '+item[1]+', measures '+item[2]+', keeps '+item[3]+' controlled, follows a safe procedure, and uses the results to draw a conclusion.'};
+    }
     return {topic:'Working science',outcomes:['SC4-WS-02','SC4-WS-04'],type:'mcq',generated:true,generatedId:serial,question:'In an investigation of how '+item[0]+', what is the independent variable?',choices:[item[1],item[2],item[3],'the conclusion'],answer:0,explanation:'The independent variable is deliberately changed, so it is '+item[1]+'.'};
   }
   if(type === 8){
     item = investigations[serial % investigations.length];
-    return {topic:'Working science',outcomes:['SC4-WS-05','SC4-WS-06'],type:'short',generated:true,generatedId:serial,question:'Explain how data could be used to identify a trend when testing how '+item[0]+'.',keywords:['data','trend','pattern','relationship','correlate','prediction','conclusion'],minMatches:2,explanation:'Data can be placed in a table or graph so patterns, trends or relationships can be identified and used to draw a conclusion or make a prediction.'};
+    var longInvestigation = serial % 5 !== 0;
+    return {topic:'Working science',outcomes:['SC4-WS-05','SC4-WS-06'],type:longInvestigation?'long':'short',generated:true,generatedId:serial,question:longInvestigation ? 'Explain how data could be used to identify a trend when testing how '+item[0]+'. Write about 4-5 sentences that describe the data table or graph, the pattern you would look for, how you would compare results, and how the trend supports a conclusion or prediction.' : 'Explain how data could be used to identify a trend when testing how '+item[0]+'. Give 1-2 sentences.',keywords:['data','trend','pattern','relationship','correlate','prediction','conclusion','graph','table'],minMatches:longInvestigation?3:2,explanation:'Data can be placed in a table or graph so patterns, trends or relationships can be identified and used to draw a conclusion or make a prediction. A strong answer explains what would be compared and how the pattern supports the conclusion.'};
   }
   if(type === 9){
     var samples = [['copper','metal','conducts electricity and is shiny'],['sulfur','non-metal','is brittle and a poor conductor'],['silicon','metalloid','has semiconductor properties'],['aluminium','metal','is malleable and conducts electricity']];
@@ -952,10 +1061,14 @@ function makeBankExpansionQuestion(serial){
   if(type === 10){
     var changes = [['ice melting','physical','the substance remains water'],['paper burning','chemical','new substances such as ash form'],['salt dissolving then being recovered','physical','the salt remains the same substance'],['iron rusting','chemical','a new substance, rust, forms']];
     item = changes[serial % changes.length];
+    if(serial % 4 === 2){
+      return {topic:'Change',outcomes:['SC4-PRT-01'],type:'long',generated:true,generatedId:serial,question:'Explain whether '+item[0]+' is a chemical or physical change. Write about 4-5 sentences that state your answer, describe the evidence, compare it with the other type of change, and explain why this matters when classifying matter.',keywords:['chemical','physical','change','evidence','new substance','same substance'],minMatches:3,explanation:item[0][0].toUpperCase()+item[0].slice(1)+' is a '+item[1]+' change because '+item[2]+'. A strong answer compares this evidence with the opposite type of change.'};
+    }
     return {topic:'Change',outcomes:['SC4-PRT-01'],type:'mcq',generated:true,generatedId:serial,question:'Is '+item[0]+' a chemical or physical change?',choices:[item[1]+' change because '+item[2], 'nuclear change because atoms vanish', 'biological change because it is alive', 'no change because matter is not involved'],answer:0,explanation:item[0][0].toUpperCase()+item[0].slice(1)+' is a '+item[1]+' change because '+item[2]+'.'};
   }
   item = scientists[serial % scientists.length];
-  return {topic:'Atomic models',outcomes:['SC4-PRT-01'],type:'short',generated:true,generatedId:serial,question:'Explain how evidence from '+item[2]+' improved the model of atomic structure.',keywords:['evidence','model','atomic','structure','technology','observation','improved'],minMatches:2,explanation:'Evidence from '+item[2]+' helped scientists improve the atomic model by supporting the idea of the '+item[1]+'.'};
+  var longModel = serial % 3 !== 0;
+  return {topic:'Atomic models',outcomes:['SC4-PRT-01'],type:longModel?'long':'short',generated:true,generatedId:serial,question:longModel ? 'Explain how evidence from '+item[2]+' improved the model of atomic structure. Write about 4-5 sentences that describe the evidence, the idea it supported, why the old model was not enough, and how the model changed.' : 'Explain how evidence from '+item[2]+' improved the model of atomic structure. Give 1-2 sentences.',keywords:['evidence','model','atomic','structure','technology','observation','improved'],minMatches:longModel?3:2,explanation:'Evidence from '+item[2]+' helped scientists improve the atomic model by supporting the idea of the '+item[1]+'. Scientific models change when new observations explain matter better than the old model.'};
 }
 
 function questionTypeBucket(item){
@@ -970,19 +1083,32 @@ function questionTypeCounts(){
 }
 
 function makeBankExpansionQuestionOfType(serial, desiredType){
-  for(var offset=0;offset<24;offset++){
+  for(var offset=0;offset<60;offset++){
     var item = makeBankExpansionQuestion(serial + offset);
-    if(!desiredType || questionTypeBucket(item) === desiredType) return item;
+    if(!desiredType || questionTypeBucket(item) === desiredType || item.type === desiredType) return item;
   }
   var fallback = makeBankExpansionQuestion(serial);
-  if(desiredType === 'word' && questionTypeBucket(fallback) !== 'word'){
+  if((desiredType === 'word' && questionTypeBucket(fallback) !== 'word') || (desiredType === 'long' && fallback.type !== 'long')){
+    return {
+      topic:'Working science',
+      outcomes:['SC4-WS-05','SC4-WS-06'],
+      type:'long',
+      generated:true,
+      generatedId:serial,
+      question:'Explain how data and observations can be used to draw a conclusion in a valid science investigation. Write about 4-5 sentences that describe the evidence, identify a pattern, explain why controls matter, and link the data to the conclusion.',
+      keywords:['data','observations','conclusion','valid','evidence','pattern','control'],
+      minMatches:3,
+      explanation:'Data and observations provide evidence. Scientists can look for patterns or trends, check that the investigation was valid, and use the evidence to draw a conclusion.'
+    };
+  }
+  if(desiredType === 'short' && fallback.type !== 'short'){
     return {
       topic:'Working science',
       outcomes:['SC4-WS-05','SC4-WS-06'],
       type:'short',
       generated:true,
       generatedId:serial,
-      question:'Explain how data and observations can be used to draw a conclusion in a valid science investigation.',
+      question:'Explain how data and observations can be used to draw a conclusion. Give 1-2 sentences.',
       keywords:['data','observations','conclusion','valid','evidence'],
       minMatches:2,
       explanation:'Data and observations provide evidence. Scientists can look for patterns or trends in that evidence and use them to draw a valid conclusion.'
@@ -995,11 +1121,16 @@ function expandQuestionBankToTarget(targetSize){
   var existing = {};
   questionBank.forEach(function(item){ existing[questionKey(item)] = true; });
   var targetMcq = Math.round(targetSize / 4);
-  var targetWord = targetSize - targetMcq;
+  var targetShort = Math.round((targetSize - targetMcq) * 0.5);
+  var targetLong = targetSize - targetMcq - targetShort;
   var serial = 1;
   while(questionBank.length < targetSize && serial < targetSize * 5){
     var counts = questionTypeCounts();
-    var desiredType = counts.mcq < targetMcq ? 'mcq' : (counts.word < targetWord ? 'word' : null);
+    var exactCounts = questionBank.reduce(function(total,item){
+      total[item.type] = (total[item.type] || 0) + 1;
+      return total;
+    },{mcq:0,short:0,long:0});
+    var desiredType = counts.mcq < targetMcq ? 'mcq' : (exactCounts.long < targetLong ? 'long' : (exactCounts.short < targetShort ? 'short' : null));
     var item = makeBankExpansionQuestionOfType(serial, desiredType);
     var key = questionKey(item);
     if(existing[key]){
@@ -1073,8 +1204,27 @@ function resetQuestionState(item){
   if(!item) return;
   delete item._selected;
   delete item._correct;
+  delete item._mark;
+  delete item._maxMark;
   delete item._aiFeedback;
   delete item._aiUsed;
+  delete item._choicesShuffled;
+}
+
+function shuffleMultipleChoiceOptions(item){
+  if(!item || item.type !== 'mcq' || item._choicesShuffled || !item.choices || !item.choices.length) return;
+  var paired = item.choices.map(function(choice,index){
+    return {choice: choice, correct: index === item.answer};
+  });
+  for(var i=paired.length-1;i>0;i--){
+    var j=Math.floor(Math.random()*(i+1));
+    var temp=paired[i];
+    paired[i]=paired[j];
+    paired[j]=temp;
+  }
+  item.choices = paired.map(function(entry){ return entry.choice; });
+  item.answer = paired.findIndex(function(entry){ return entry.correct; });
+  item._choicesShuffled = true;
 }
 
 function prevQuestion(){
@@ -1132,6 +1282,7 @@ function forwardQuestion(){
 function renderCurrentQuestion(){
   var card=$('questionCard');
   var item=currentQuestion();
+  shuffleMultipleChoiceOptions(item);
   var answered = item._selected !== undefined;
   var feedbackHtml='';
 
@@ -1163,6 +1314,12 @@ function renderCurrentQuestion(){
     if(answered){
       choicesHtml = '<p class="question-detail">You answered:</p>' +
         '<textarea id="shortReply" class="'+textAreaClass+'" rows="5" disabled>'+escapeHtml(item._selected)+'</textarea>';
+      if(item._correct !== undefined){
+        var displayMaxMark = item._maxMark || maxMarkForItem(item);
+        var displayMark = item._mark !== undefined ? item._mark : (item._correct ? displayMaxMark : 0);
+        var markClass = displayMark >= Math.ceil(displayMaxMark * 0.6) ? 'positive' : 'negative';
+        choicesHtml += '<div class="mark-chip '+markClass+'">Mark: '+displayMark+'/'+displayMaxMark+'</div>';
+      }
       if(item._aiFeedback){
         choicesHtml += '<div class="feedback '+(item._correct?'positive':'negative')+'" style="margin-top:12px;">AI feedback: '+escapeHtml(item._aiFeedback)+'</div>';
       }
@@ -1250,6 +1407,41 @@ function isQuestionCopyAnswer(answer,item){
   var questionWords = normalizeWords(item && item.question ? item.question : '').filter(function(word){return word.length > 3;});
   var addsSubstantialAnswer = answerAddsModelContent(answer,item) && answerWords.length >= questionWords.length + 6;
   return copyScore >= 0.62 && !addsSubstantialAnswer;
+}
+
+function maxMarkForItem(item){
+  return item && item.type === 'long' ? 5 : 3;
+}
+
+function answerSubstanceMarkCap(item,answer,maxMark){
+  var words = normalizeWords(answer).filter(function(word){return word.length > 2;});
+  var unique = {};
+  words.forEach(function(word){unique[word] = true;});
+  var uniqueCount = Object.keys(unique).length;
+  if(uniqueCount <= 1) return Math.min(1, maxMark);
+  if(uniqueCount <= 3) return Math.min(item && item.type === 'long' ? 2 : 1, maxMark);
+  if(uniqueCount <= 6) return Math.min(item && item.type === 'long' ? 3 : 2, maxMark);
+  return maxMark;
+}
+
+function markFromGradeResult(item,result,answer){
+  var maxMark = maxMarkForItem(item);
+  var rawMark;
+  if(result && typeof result.mark === 'number'){
+    rawMark = result.maxMark && result.maxMark !== maxMark ? (result.mark / result.maxMark) * maxMark : result.mark;
+  } else if(result && typeof result.scoreValue === 'number'){
+    rawMark = result.scoreValue * maxMark;
+  } else if(result && typeof result.confidence === 'number'){
+    rawMark = (result.confidence / 100) * maxMark;
+  } else {
+    rawMark = result && result.score ? maxMark : 0;
+  }
+  var cappedMark = clamp(Math.round(rawMark), 0, maxMark);
+  cappedMark = Math.min(cappedMark, answerSubstanceMarkCap(item, answer || '', maxMark));
+  return {
+    mark: cappedMark,
+    maxMark: maxMark
+  };
 }
 
 function normalizeWords(text){
@@ -2123,8 +2315,13 @@ var OfflineMarkerEngine = (function(){
     var profile = profileFor(item);
     var answerText = clean(answer);
     if(isQuestionCopyAnswer(answer,item)){
+      var copiedMaxMark = maxMarkForItem(item);
       return {
         score: 0,
+        mark: 0,
+        maxMark: copiedMaxMark,
+        confidence: 0,
+        scoreValue: 0,
         explanation: 'Mini marker: this mostly repeats the question rather than answering it. Add the science idea from the model answer and explain why it answers the question.',
         _aiProvider: 'Mini marker'
       };
@@ -2157,6 +2354,10 @@ var OfflineMarkerEngine = (function(){
     var matchesModel = modelScore >= 0.62 || (modelText && answerText === modelText);
     if(matchesModel) total = Math.max(total, 0.72);
     var passed = matchesModel || (total >= 0.54 && (enoughCoreIdeas || mustScore >= 0.5 || relationScore >= 0.45 || concepts.score >= 0.5));
+    var maxMark = maxMarkForItem(item);
+    var mark = Math.round(total * maxMark);
+    if(passed) mark = Math.max(mark, Math.ceil(maxMark * 0.6));
+    mark = clamp(mark, 0, maxMark);
     var bestEvidence = profile.must.filter(function(phrase){ return flexiblePhraseScore(answerText, phrase) >= 0.55; }).slice(0,2).join(' and ');
     if(!bestEvidence && matchesModel) bestEvidence = 'the model answer closely';
     if(!bestEvidence) bestEvidence = concepts.hitLabels.slice(0,2).join(' and ') || profile.label;
@@ -2172,6 +2373,10 @@ var OfflineMarkerEngine = (function(){
     };
     return {
       score: result.score,
+      mark: mark,
+      maxMark: maxMark,
+      confidence: result.confidence,
+      scoreValue: total,
       explanation: makeFeedback(result),
       _aiProvider: 'Mini marker'
     };
@@ -2186,6 +2391,8 @@ function gradeWithMiniMarker(answer,item){
 
 function getAiStatus(){
   if(!aiEnabled) return {className:'amber', title:'AI providers disabled in debug menu'};
+  if(aiStartupChecking) return {className:'amber', title:'Checking whether cloud AI is available...'};
+  if(backendAiAvailable) return {className:'green', title:'Hosted AI ready - no money or school-laptop install needed'};
   if(puterAiAvailable) return {className:'green', title:'Puter cloud AI ready - no download needed'};
   if(pollinationsAvailable) return {className:'green', title:'Backup cloud AI will be tried if Puter is blocked'};
   if(browserAiAvailable) return {className:'green', title:'Browser AI ready'};
@@ -2196,12 +2403,13 @@ function getAiStatus(){
 }
 
 function hasConnectedAI(){
-  return !!(aiEnabled && (puterAiAvailable || pollinationsAvailable || browserAiAvailable || ollamaAvailable || OPENAI_API_KEY_PLAINTEXT || ENCRYPTED_OPENAI_KEY));
+  return !!(aiEnabled && (backendAiAvailable || puterAiAvailable || pollinationsAvailable || browserAiAvailable || ollamaAvailable || OPENAI_API_KEY_PLAINTEXT || ENCRYPTED_OPENAI_KEY));
 }
 
 async function gradeWithBestAI(text,item){
   var guidance = item.explanation || item.question;
   var providers = [];
+  if(aiEnabled && backendAiAvailable) providers.push({name:'Hosted AI', grade:function(){return gradeWithBackendAI(text, item);}, fail:function(){backendAiAvailable=false;}});
   if(aiEnabled && puterAiAvailable) providers.push({name:'Puter', grade:function(){return gradeWithPuterAI(text, guidance);}, fail:function(){puterAiAvailable=false;}});
   if(aiEnabled && pollinationsAvailable) providers.push({name:'Backup cloud', grade:function(){return gradeWithPollinationsAI(text, guidance);}, fail:function(){pollinationsAvailable=false;}});
   if(aiEnabled && browserAiAvailable) providers.push({name:'Browser AI', grade:function(){return gradeWithBrowserAI(text, guidance);}, fail:function(){browserAiAvailable=false;}});
@@ -2241,6 +2449,8 @@ function submitShort(){
   totals.answered++;
   if(isQuestionCopyAnswer(text,item)){
     item._correct = false;
+    item._maxMark = maxMarkForItem(item);
+    item._mark = 0;
     item._aiUsed = true;
     item._aiFeedback = 'Mini marker: this mostly repeats the question rather than answering it. Add the science idea from the model answer and explain why it answers the question.';
     lastAiProvider = 'Copy check';
@@ -2250,7 +2460,10 @@ function submitShort(){
   }
   gradeWithBestAI(text,item)
     .then(function(result){
-      item._correct = !!(result && result.score);
+      var gradeMark = markFromGradeResult(item,result,text);
+      item._correct = gradeMark.mark >= Math.ceil(gradeMark.maxMark * 0.6);
+      item._mark = gradeMark.mark;
+      item._maxMark = gradeMark.maxMark;
       item._aiUsed = !!(result && result._aiProvider);
       item._aiFeedback = item._aiUsed && result && result.explanation ? result.explanation : '';
       if(item._correct) totals.correct++;
@@ -2260,7 +2473,10 @@ function submitShort(){
     .catch(function(err){
       console.log('AI grading failed: '+err.message+", using mini marker");
       return gradeWithMiniMarker(text,item).then(function(result){
-        item._correct = !!(result && result.score);
+        var gradeMark = markFromGradeResult(item,result,text);
+        item._correct = gradeMark.mark >= Math.ceil(gradeMark.maxMark * 0.6);
+        item._mark = gradeMark.mark;
+        item._maxMark = gradeMark.maxMark;
         item._aiFeedback = result && result.explanation ? result.explanation : '';
         item._aiUsed = true;
         if(item._correct) totals.correct++;
@@ -2287,6 +2503,7 @@ function updateProgress(){
 
 function providerDebugRows(){
   return [
+    ['Hosted AI', backendAiAvailable],
     ['Puter cloud', puterAiAvailable],
     ['Backup cloud', pollinationsAvailable],
     ['Browser AI', browserAiAvailable],
@@ -2318,7 +2535,20 @@ async function runAiConnectionTest(){
   renderDebugMenu();
   var testAnswer = 'A chemical change creates a new substance.';
   var testGuidance = 'A chemical change makes a new substance.';
+  var testItem = {
+    type:'short',
+    question:'Explain how you can tell a chemical change has happened.',
+    explanation:testGuidance,
+    keywords:['chemical','change','new substance']
+  };
   var tests = [
+    {
+      name:'Hosted AI',
+      run:function(){
+        if(!backendAiAvailable) throw new Error('Backend AI not available');
+        return gradeWithBackendAI(testAnswer, testItem);
+      }
+    },
     {
       name:'Puter cloud',
       run:function(){
@@ -2397,6 +2627,12 @@ function renderDebugMenu(){
   var points = totals.correct + ' / ' + totals.answered;
   var percent = totals.answered ? clamp(Math.round(totals.correct / totals.answered * 100),0,100) : 0;
   var bankCounts = questionTypeCounts();
+  var currentMark = '-';
+  if(item && item._correct !== undefined){
+    var debugMaxMark = item._maxMark || maxMarkForItem(item);
+    var debugMark = item._mark !== undefined ? item._mark : (item._correct ? debugMaxMark : 0);
+    currentMark = debugMark + '/' + debugMaxMark;
+  }
   panel.classList.remove('hidden');
   panel.innerHTML =
     '<div class="debug-head">' +
@@ -2416,6 +2652,7 @@ function renderDebugMenu(){
       '<div><dt>Generated</dt><dd>'+String(!!(item && item.generated))+(item && item.generatedId ? ' #'+item.generatedId : '')+'</dd></div>' +
       '<div><dt>Answered</dt><dd>'+String(answered)+'</dd></div>' +
       '<div><dt>Correct</dt><dd>'+String(item && item._correct !== undefined ? item._correct : '-')+'</dd></div>' +
+      '<div><dt>Question mark</dt><dd>'+escapeHtml(currentMark)+'</dd></div>' +
       '<div><dt>Points</dt><dd>'+points+' ('+percent+'%)</dd></div>' +
       '<div><dt>Selected</dt><dd>'+escapeHtml(answered ? item._selected : '-').slice(0,120)+'</dd></div>' +
       '<div><dt>AI enabled</dt><dd class="'+(aiEnabled?'debug-ok':'debug-off')+'">'+String(aiEnabled)+'</dd></div>' +
@@ -2459,7 +2696,10 @@ function forceMiniMarkerForCurrent(){
     return;
   }
   gradeWithMiniMarker(answer,item).then(function(result){
-    item._correct = !!result.score;
+    var gradeMark = markFromGradeResult(item,result,answer);
+    item._correct = gradeMark.mark >= Math.ceil(gradeMark.maxMark * 0.6);
+    item._mark = gradeMark.mark;
+    item._maxMark = gradeMark.maxMark;
     item._aiUsed = true;
     item._aiFeedback = result.explanation;
     lastAiProvider = 'Mini marker';
@@ -2485,19 +2725,27 @@ function setupDebugMenu(){
   });
 }
 
+async function refreshAiAvailabilityOnStartup(){
+  aiStartupChecking = true;
+  renderCurrentQuestion();
+  renderDebugMenu();
+  backendAiAvailable = await checkBackendAiAvailable();
+  puterAiAvailable = !backendAiAvailable ? await checkPuterAiUsable() : false;
+  pollinationsAvailable = !backendAiAvailable && !puterAiAvailable ? await checkPollinationsAvailable() : false;
+  browserAiAvailable = !backendAiAvailable && !puterAiAvailable && !pollinationsAvailable ? await checkBrowserAiAvailable() : false;
+  ollamaAvailable = !backendAiAvailable && !puterAiAvailable && !pollinationsAvailable && !browserAiAvailable ? await checkOllamaAvailable() : false;
+  apiKeyValid = !backendAiAvailable && !puterAiAvailable && !pollinationsAvailable && !browserAiAvailable && !ollamaAvailable ? await validateOpenAIKey() : false;
+  aiStartupChecking = false;
+  renderCurrentQuestion();
+  renderDebugMenu();
+}
+
 window.addEventListener('DOMContentLoaded', async function(){
-  puterAiAvailable = checkPuterAiAvailable();
-  browserAiAvailable = await checkBrowserAiAvailable();
-  if(!puterAiAvailable && !pollinationsAvailable && !browserAiAvailable){
-    ollamaAvailable = await checkOllamaAvailable();
-  }
-  if(!puterAiAvailable && !pollinationsAvailable && !browserAiAvailable && !ollamaAvailable){
-    apiKeyValid = await validateOpenAIKey();
-  }
   expandQuestionBankToTarget(1000);
   setupDebugMenu();
   startQuiz();
   setupPeriodicToggle();
   enhancePeriodicTable();
   renderInteractivePeriodicTable();
+  refreshAiAvailabilityOnStartup();
 });

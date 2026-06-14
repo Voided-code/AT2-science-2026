@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: science-at2-quiz
+    env: node
+    plan: free
+    buildCommand: ""
+    startCommand: "node server.js"
