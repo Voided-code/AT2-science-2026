@@ -470,6 +470,8 @@ var debugMenuOpen = false;
 var aiEnabled = true;
 var seenQuestionKeys = {};
 var generatedQuestionCount = 0;
+var aiConnectionTestResults = [];
+var aiConnectionTesting = false;
 
 var assessmentContext = [
   'NESA syllabus outcomes to be assessed:',
@@ -644,7 +646,12 @@ function buildQuestionBank(){
   var longQuestions = [
     {question:'Explain how the structure of the periodic table helps scientists predict the properties of elements using groups and periods.',type:'long',keywords:['groups','periods','properties','predict','atomic number','reactive','noble gas'],minMatches:3,explanation:'The periodic table arranges elements by atomic number and groups elements with similar chemistry together, so scientists can predict properties from position.'},
     {question:'Describe how a student planning an investigation on reactions between acids and metals would use working scientifically skills.',type:'long',keywords:['plan','hypothesis','acid','metal','reaction','evidence','observe','procedure'],minMatches:3,explanation:'A student uses working scientifically skills to plan the experiment, predict outcomes, observe reactions, and explain results using evidence.'},
-    {question:'Explain why elements in the same group have similar properties and why properties change across a period.',type:'long',keywords:['group','period','similar','properties','outer shell','reactivity','trend'],minMatches:3,explanation:'Elements in a group share outer-shell structure, so they behave similarly, while properties vary across a period as electron shells fill.'}
+    {question:'Explain why elements in the same group have similar properties and why properties change across a period.',type:'long',keywords:['group','period','similar','properties','outer shell','reactivity','trend'],minMatches:3,explanation:'Elements in a group share outer-shell structure, so they behave similarly, while properties vary across a period as electron shells fill.'},
+    {question:'A student says copper is used for electrical wiring only because it is cheap. Do you agree? Explain which property makes copper suitable and why that property matters.',type:'long',keywords:['copper','conductivity','electrical','wiring','property','use','because'],minMatches:3,explanation:'Copper is suitable for electrical wiring mainly because it conducts electricity very well. Cost may matter, but the key scientific property is conductivity, which lets electrical energy move through the wire efficiently.'},
+    {question:'A student tests four unknown solids and records whether they are shiny, brittle, malleable and conductive. How could the student use these observations to decide which samples are metals, non-metals or metalloids? Explain why.',type:'long',keywords:['shiny','brittle','malleable','conductive','metal','non-metal','metalloid','observations'],minMatches:4,explanation:'The student can compare the observations with known properties. Metals are usually shiny, malleable and conductive, non-metals are often brittle and poor conductors, and metalloids can show mixed properties such as limited conductivity.'},
+    {question:'A graph shows that one metal produces bubbles much faster than another when placed in acid. What conclusion could you draw, and why is the graph useful evidence?',type:'long',keywords:['graph','bubbles','metal','acid','reaction speed','data','trend','conclusion','evidence'],minMatches:4,explanation:'The graph can show which metal reacts faster by comparing the rate of bubble production. It is useful evidence because the data reveals a trend or pattern, allowing a conclusion about relative reactivity.'},
+    {question:'How did new evidence and technology help scientists improve models of atomic structure over time? Give at least one example and explain why the model changed.',type:'long',keywords:['evidence','technology','model','atomic structure','electron','nucleus','neutron','changed'],minMatches:4,explanation:'Atomic models changed when new evidence became available. For example, cathode ray experiments supported the electron, gold foil evidence supported the nucleus, and later experiments supported the neutron, so scientists updated models to better match observations.'},
+    {question:'An atom has 11 protons. Explain what this tells you about the element, its atomic number and the number of electrons if the atom is neutral.',type:'long',keywords:['11','protons','atomic number','sodium','electrons','neutral'],minMatches:3,explanation:'An atom with 11 protons has atomic number 11, so it is sodium. If it is neutral, it has 11 electrons because neutral atoms have equal numbers of protons and electrons.'}
   ];
   longQuestions.forEach(function(item){ bank.push({topic:'Periodic table',outcomes:['SC4-PRT-01'],type:item.type,question:item.question,keywords:item.keywords,minMatches:item.minMatches,explanation:item.explanation});});
 
@@ -907,7 +914,7 @@ function makeBankExpansionQuestion(serial){
   }
   if(type === 1){
     item = elementUses[serial % elementUses.length];
-    return {topic:'Materials and properties',outcomes:['SC4-PRT-01'],type:'short',generated:true,generatedId:serial,question:'Explain why '+item[0]+' is useful for '+item[2]+'.',keywords:[item[0],'properties','use'],minMatches:2,explanation:item[0][0].toUpperCase()+item[0].slice(1)+' is useful for '+item[2]+' because '+item[3]+'.'};
+    return {topic:'Materials and properties',outcomes:['SC4-PRT-01'],type:'short',generated:true,generatedId:serial,question:'Explain why '+item[0]+' is useful for '+item[2]+'.',keywords:[item[0],'properties','use','useful','because','suitable'],minMatches:2,explanation:item[0][0].toUpperCase()+item[0].slice(1)+' is useful for '+item[2]+' because '+item[3]+'.'};
   }
   if(type === 2){
     item = particles[serial % particles.length];
@@ -927,7 +934,7 @@ function makeBankExpansionQuestion(serial){
   }
   if(type === 6){
     item = periodic[serial % periodic.length];
-    return {topic:'Periodic table',outcomes:['SC4-PRT-01'],type:'short',generated:true,generatedId:serial,question:'Predict one property of '+item[0]+' from its position on the periodic table.',keywords:['group','period','property','predict'],minMatches:2,explanation:item[0][0].toUpperCase()+item[0].slice(1)+' can be predicted from its position: it is a '+item[4]+' in '+item[2]+' and '+item[3]+'.'};
+    return {topic:'Periodic table',outcomes:['SC4-PRT-01'],type:'short',generated:true,generatedId:serial,question:'Predict one property of '+item[0]+' from its position on the periodic table.',keywords:['group','period','property','predict','position','periodic table','reactivity'],minMatches:2,explanation:item[0][0].toUpperCase()+item[0].slice(1)+' can be predicted from its position: it is a '+item[4]+' in '+item[2]+' and '+item[3]+'.'};
   }
   if(type === 7){
     item = investigations[serial % investigations.length];
@@ -935,7 +942,7 @@ function makeBankExpansionQuestion(serial){
   }
   if(type === 8){
     item = investigations[serial % investigations.length];
-    return {topic:'Working science',outcomes:['SC4-WS-05','SC4-WS-06'],type:'short',generated:true,generatedId:serial,question:'Explain how data could be used to identify a trend when testing how '+item[0]+'.',keywords:['data','trend','pattern','conclusion'],minMatches:2,explanation:'Data can be placed in a table or graph so patterns can be identified and used to draw a conclusion.'};
+    return {topic:'Working science',outcomes:['SC4-WS-05','SC4-WS-06'],type:'short',generated:true,generatedId:serial,question:'Explain how data could be used to identify a trend when testing how '+item[0]+'.',keywords:['data','trend','pattern','relationship','correlate','prediction','conclusion'],minMatches:2,explanation:'Data can be placed in a table or graph so patterns, trends or relationships can be identified and used to draw a conclusion or make a prediction.'};
   }
   if(type === 9){
     var samples = [['copper','metal','conducts electricity and is shiny'],['sulfur','non-metal','is brittle and a poor conductor'],['silicon','metalloid','has semiconductor properties'],['aluminium','metal','is malleable and conducts electricity']];
@@ -948,15 +955,52 @@ function makeBankExpansionQuestion(serial){
     return {topic:'Change',outcomes:['SC4-PRT-01'],type:'mcq',generated:true,generatedId:serial,question:'Is '+item[0]+' a chemical or physical change?',choices:[item[1]+' change because '+item[2], 'nuclear change because atoms vanish', 'biological change because it is alive', 'no change because matter is not involved'],answer:0,explanation:item[0][0].toUpperCase()+item[0].slice(1)+' is a '+item[1]+' change because '+item[2]+'.'};
   }
   item = scientists[serial % scientists.length];
-  return {topic:'Atomic models',outcomes:['SC4-PRT-01'],type:'short',generated:true,generatedId:serial,question:'Explain how evidence from '+item[2]+' improved the model of atomic structure.',keywords:['evidence','model','atomic','structure'],minMatches:2,explanation:'Evidence from '+item[2]+' helped scientists improve the atomic model by supporting the idea of the '+item[1]+'.'};
+  return {topic:'Atomic models',outcomes:['SC4-PRT-01'],type:'short',generated:true,generatedId:serial,question:'Explain how evidence from '+item[2]+' improved the model of atomic structure.',keywords:['evidence','model','atomic','structure','technology','observation','improved'],minMatches:2,explanation:'Evidence from '+item[2]+' helped scientists improve the atomic model by supporting the idea of the '+item[1]+'.'};
+}
+
+function questionTypeBucket(item){
+  return item && item.type === 'mcq' ? 'mcq' : 'word';
+}
+
+function questionTypeCounts(){
+  return questionBank.reduce(function(counts,item){
+    counts[questionTypeBucket(item)]++;
+    return counts;
+  },{mcq:0,word:0});
+}
+
+function makeBankExpansionQuestionOfType(serial, desiredType){
+  for(var offset=0;offset<24;offset++){
+    var item = makeBankExpansionQuestion(serial + offset);
+    if(!desiredType || questionTypeBucket(item) === desiredType) return item;
+  }
+  var fallback = makeBankExpansionQuestion(serial);
+  if(desiredType === 'word' && questionTypeBucket(fallback) !== 'word'){
+    return {
+      topic:'Working science',
+      outcomes:['SC4-WS-05','SC4-WS-06'],
+      type:'short',
+      generated:true,
+      generatedId:serial,
+      question:'Explain how data and observations can be used to draw a conclusion in a valid science investigation.',
+      keywords:['data','observations','conclusion','valid','evidence'],
+      minMatches:2,
+      explanation:'Data and observations provide evidence. Scientists can look for patterns or trends in that evidence and use them to draw a valid conclusion.'
+    };
+  }
+  return fallback;
 }
 
 function expandQuestionBankToTarget(targetSize){
   var existing = {};
   questionBank.forEach(function(item){ existing[questionKey(item)] = true; });
+  var targetMcq = Math.round(targetSize / 4);
+  var targetWord = targetSize - targetMcq;
   var serial = 1;
   while(questionBank.length < targetSize && serial < targetSize * 5){
-    var item = makeBankExpansionQuestion(serial);
+    var counts = questionTypeCounts();
+    var desiredType = counts.mcq < targetMcq ? 'mcq' : (counts.word < targetWord ? 'word' : null);
+    var item = makeBankExpansionQuestionOfType(serial, desiredType);
     var key = questionKey(item);
     if(existing[key]){
       if(/\?$/.test(item.question)){
@@ -1176,6 +1220,38 @@ function evaluateShortAnswer(text,item){
   return matchCount >= threshold;
 }
 
+function copiedQuestionScore(answer,item){
+  if(!item || !item.question) return 0;
+  var answerWords = normalizeWords(answer).filter(function(word){return word.length > 3;});
+  var questionWords = normalizeWords(item.question).filter(function(word){return word.length > 3;});
+  if(answerWords.length < 4 || questionWords.length < 4) return 0;
+  var questionSet = {};
+  questionWords.forEach(function(word){questionSet[word] = true;});
+  var copied = answerWords.reduce(function(total,word){
+    return total + (questionSet[word] ? 1 : 0);
+  },0);
+  return copied / answerWords.length;
+}
+
+function answerAddsModelContent(answer,item){
+  var modelWords = normalizeWords(item.explanation || '').filter(function(word){return word.length > 3;});
+  if(!modelWords.length) return false;
+  var answerSet = {};
+  normalizeWords(answer).forEach(function(word){answerSet[word] = true;});
+  var modelHits = modelWords.reduce(function(total,word){
+    return total + (answerSet[word] ? 1 : 0);
+  },0);
+  return modelHits / modelWords.length >= 0.24;
+}
+
+function isQuestionCopyAnswer(answer,item){
+  var copyScore = copiedQuestionScore(answer,item);
+  var answerWords = normalizeWords(answer).filter(function(word){return word.length > 3;});
+  var questionWords = normalizeWords(item && item.question ? item.question : '').filter(function(word){return word.length > 3;});
+  var addsSubstantialAnswer = answerAddsModelContent(answer,item) && answerWords.length >= questionWords.length + 6;
+  return copyScore >= 0.62 && !addsSubstantialAnswer;
+}
+
 function normalizeWords(text){
   var extras = {
     atom:['atomic','element'],
@@ -1199,6 +1275,37 @@ function normalizeWords(text){
     metalloids:['semiconductor','properties'],
     conductor:['conductivity','metal'],
     conductive:['conductivity','metal'],
+    correlate:['relationship','trend','pattern'],
+    correlated:['relationship','trend','pattern'],
+    correlation:['relationship','trend','pattern'],
+    relationship:['trend','pattern'],
+    relationships:['trend','pattern'],
+    predict:['prediction','conclusion','trend'],
+    prediction:['predict','conclusion','trend'],
+    future:['prediction','predict'],
+    reation:['reaction'],
+    concluson:['conclusion'],
+    graph:['data','trend','pattern'],
+    table:['data','organise','trend'],
+    measured:['dependent','variable','data'],
+    measure:['dependent','variable','data'],
+    result:['data','evidence','conclusion'],
+    results:['data','evidence','conclusion'],
+    evidence:['data','observation','conclusion'],
+    observation:['evidence','data'],
+    observations:['evidence','data'],
+    accurate:['measurement','tool','instrument'],
+    accuracy:['measurement','tool','instrument'],
+    valid:['fair','control','procedure'],
+    reliable:['repeat','consistent'],
+    reliability:['repeat','consistent'],
+    consistent:['repeat','reliable'],
+    solubility:['dissolve','solution'],
+    acid:['reaction','chemical'],
+    alloy:['mixture','metal','properties'],
+    compound:['substance','elements','bonded'],
+    molecule:['atoms','bonded'],
+    symbol:['element','periodic'],
     cloudy:['precipitate','solid'],
     bubbles:['gas','reaction'],
     fizzing:['gas','reaction'],
@@ -1417,6 +1524,72 @@ var miniMarkerRubrics = [
       {name:'use evidence to conclude', terms:['conclusion','trend','pattern','result']}
     ],
     relationships:[['evidence','conclusion'],['variable','fair']]
+  },
+  {
+    match:/data could be used to identify a trend/i,
+    required:['data','trend','relationship'],
+    bonus:['graph','table','pattern','prediction','conclusion','correlate'],
+    ideas:[
+      {name:'data is used to find a trend or relationship', terms:['data','trend','pattern','relationship','correlate']},
+      {name:'the trend links metal type with reaction speed', terms:['metal type','reaction speed','metal','speed','acid']},
+      {name:'the trend can support a prediction or conclusion', terms:['prediction','predict','future','conclusion']}
+    ],
+    relationships:[['data','trend'],['metal','speed'],['trend','prediction']]
+  },
+  {
+    match:/explain why .* useful for/i,
+    required:['property','use'],
+    bonus:['conduct','reactive','unreactive','lightweight','semiconductor','strong','corrosion'],
+    ideas:[
+      {name:'the answer links a material property to a use', terms:['property','use','useful','because']},
+      {name:'the answer names a relevant physical or chemical property', terms:['conduct','reactive','unreactive','lightweight','semiconductor','strong','corrosion','hard']},
+      {name:'the explanation connects the property to the job', terms:['because','so','therefore','suitable']}
+    ],
+    relationships:[['property','use'],['because','useful']]
+  },
+  {
+    match:/what changes in atomic structure as atomic number increases/i,
+    required:['atomic number','protons','electrons'],
+    bonus:['shells','neutral atom','increases','first 18'],
+    ideas:[
+      {name:'atomic number means proton number', terms:['atomic number','protons','proton number']},
+      {name:'neutral atoms have matching electrons', terms:['electrons','neutral','same number']},
+      {name:'electrons fill shells as number increases', terms:['shells','electron shells','arranged']}
+    ],
+    relationships:[['atomic number','protons'],['protons','electrons'],['electrons','shells']]
+  },
+  {
+    match:/test.*metal or non-metal|identify whether a sample is a metal/i,
+    required:['test','metal','non-metal'],
+    bonus:['conductivity','shiny','malleable','brittle','circuit'],
+    ideas:[
+      {name:'conductivity can identify metals', terms:['conductivity','circuit','conduct electricity','bulb']},
+      {name:'metals and non-metals have different properties', terms:['metal','non-metal','shiny','malleable','brittle']},
+      {name:'the test uses observations', terms:['test','observe','compare','result']}
+    ],
+    relationships:[['metal','conduct'],['non-metal','poor conductor'],['test','observe']]
+  },
+  {
+    match:/independent variable|dependent variable|control variable|fair test/i,
+    required:['variable'],
+    bonus:['independent','dependent','control','changed','measured','same','fair'],
+    ideas:[
+      {name:'independent variable is changed', terms:['independent','changed','deliberately']},
+      {name:'dependent variable is measured', terms:['dependent','measured','result','data']},
+      {name:'control variables are kept the same', terms:['control','same','fair','valid']}
+    ],
+    relationships:[['independent','changed'],['dependent','measured'],['control','same']]
+  },
+  {
+    match:/predict.*property|position on the periodic table|from its position/i,
+    required:['predict','property','periodic table'],
+    bonus:['group','period','reactivity','shell','metal','non-metal','noble gas'],
+    ideas:[
+      {name:'position helps predict properties', terms:['position','predict','properties']},
+      {name:'groups show similar properties', terms:['group','similar','properties','reactivity']},
+      {name:'periods relate to shells', terms:['period','shells','row']}
+    ],
+    relationships:[['position','predict'],['group','properties'],['period','shell']]
   },
   {
     match:/same group have similar properties/i,
@@ -1649,6 +1822,87 @@ var OfflineMarkerEngine = (function(){
       minimumIdeas:3
     },
     {
+      match:/data could be used to identify a trend/i,
+      label:'using data to identify trends',
+      must:['data','trend','relationship'],
+      should:['graph','table','pattern','prediction','conclusion','correlate'],
+      avoid:['guess without data','ignore the results'],
+      relationships:[['data','trend'],['metal','speed'],['trend','prediction']],
+      minimumIdeas:2
+    },
+    {
+      match:/explain why .* useful for/i,
+      label:'linking properties to uses',
+      must:['property','use'],
+      should:['conduct','reactive','unreactive','lightweight','semiconductor','strong','corrosion','because'],
+      avoid:['random use','no property'],
+      relationships:[['property','use'],['because','useful']],
+      minimumIdeas:1
+    },
+    {
+      match:/what changes in atomic structure as atomic number increases/i,
+      label:'atomic number and structure',
+      must:['atomic number','protons','electrons'],
+      should:['shells','neutral atom','increases','first 18'],
+      avoid:['atomic number is neutrons','electrons are in nucleus'],
+      relationships:[['atomic number','protons'],['protons','electrons'],['electrons','shells']],
+      minimumIdeas:2
+    },
+    {
+      match:/test.*metal or non-metal|identify whether a sample is a metal/i,
+      label:'testing metals and non-metals',
+      must:['test','metal','non-metal'],
+      should:['conductivity','shiny','malleable','brittle','circuit','observe'],
+      avoid:['atomic number changes','no observation'],
+      relationships:[['metal','conduct'],['test','observe']],
+      minimumIdeas:2
+    },
+    {
+      match:/line graph|graph.*time|data changes over time/i,
+      label:'representing data with graphs',
+      must:['data','time','trend'],
+      should:['line graph','graph','pattern','change','over time'],
+      avoid:['pie chart for time','ignore data'],
+      relationships:[['graph','trend'],['time','change'],['data','pattern']],
+      minimumIdeas:2
+    },
+    {
+      match:/repeating measurements|repeating trials|improves reliability/i,
+      label:'reliability from repeated trials',
+      must:['repeat','reliable'],
+      should:['consistent','random error','average','confirm','one-off'],
+      avoid:['accuracy only','validity only'],
+      relationships:[['repeat','reliable'],['consistent','confirm'],['random error','average']],
+      minimumIdeas:2
+    },
+    {
+      match:/evidence.*improved the model of atomic structure|atomic model|models of atomic structure/i,
+      label:'evidence and atomic models',
+      must:['evidence','model','atomic structure'],
+      should:['observation','technology','improved','electron','nucleus','neutron','shell'],
+      avoid:['models never change','no evidence needed'],
+      relationships:[['evidence','model'],['observation','improved'],['technology','understanding']],
+      minimumIdeas:2
+    },
+    {
+      match:/independent variable|dependent variable|control variable|fair test/i,
+      label:'investigation variables',
+      must:['variable'],
+      should:['independent','dependent','control','changed','measured','same','fair'],
+      avoid:['change many variables','dependent is changed deliberately'],
+      relationships:[['independent','changed'],['dependent','measured'],['control','same']],
+      minimumIdeas:1
+    },
+    {
+      match:/predict.*property|position on the periodic table|from its position/i,
+      label:'predicting properties from periodic position',
+      must:['predict','property','periodic table'],
+      should:['group','period','reactivity','shell','metal','non-metal','noble gas'],
+      avoid:['position does not matter','groups are rows'],
+      relationships:[['position','predict'],['group','properties'],['period','shell']],
+      minimumIdeas:2
+    },
+    {
       match:/same group have similar properties/i,
       label:'groups and period trends',
       must:['group','outer shell','electron','properties'],
@@ -1680,6 +1934,9 @@ var OfflineMarkerEngine = (function(){
     /\bas a result\b/i,
     /\bfor example\b/i,
     /\bevidence\b/i,
+    /\bcorrelat(e|es|ed|ion)\b/i,
+    /\brelationship\b/i,
+    /\bprediction\b/i,
     /\bcompared with\b/i,
     /\bmore\b.+\bthan\b/i,
     /\bless\b.+\bthan\b/i
@@ -1865,6 +2122,13 @@ var OfflineMarkerEngine = (function(){
   function grade(answer, item){
     var profile = profileFor(item);
     var answerText = clean(answer);
+    if(isQuestionCopyAnswer(answer,item)){
+      return {
+        score: 0,
+        explanation: 'Mini marker: this mostly repeats the question rather than answering it. Add the science idea from the model answer and explain why it answers the question.',
+        _aiProvider: 'Mini marker'
+      };
+    }
     var modelText = clean(item.explanation || '');
     var expectedText = clean((item.explanation || '') + ' ' + (item.question || '') + ' ' + (item.keywords || []).join(' '));
     var words = tokens(answer);
@@ -1975,6 +2239,15 @@ function submitShort(){
   item._selected=text;
   answeredLast=true;
   totals.answered++;
+  if(isQuestionCopyAnswer(text,item)){
+    item._correct = false;
+    item._aiUsed = true;
+    item._aiFeedback = 'Mini marker: this mostly repeats the question rather than answering it. Add the science idea from the model answer and explain why it answers the question.';
+    lastAiProvider = 'Copy check';
+    renderCurrentQuestion();
+    updateProgress();
+    return;
+  }
   gradeWithBestAI(text,item)
     .then(function(result){
       item._correct = !!(result && result.score);
@@ -2025,6 +2298,92 @@ function providerDebugRows(){
   }).join('');
 }
 
+function withTimeout(promise, ms){
+  return new Promise(function(resolve, reject){
+    var timeout = setTimeout(function(){ reject(new Error('timeout')); }, ms);
+    promise.then(function(value){
+      clearTimeout(timeout);
+      resolve(value);
+    }).catch(function(err){
+      clearTimeout(timeout);
+      reject(err);
+    });
+  });
+}
+
+async function runAiConnectionTest(){
+  if(aiConnectionTesting) return;
+  aiConnectionTesting = true;
+  aiConnectionTestResults = [{name:'Status', status:'testing', detail:'Running connection checks...'}];
+  renderDebugMenu();
+  var testAnswer = 'A chemical change creates a new substance.';
+  var testGuidance = 'A chemical change makes a new substance.';
+  var tests = [
+    {
+      name:'Puter cloud',
+      run:function(){
+        if(!checkPuterAiAvailable()) throw new Error('Puter script not loaded');
+        return gradeWithPuterAI(testAnswer, testGuidance);
+      }
+    },
+    {
+      name:'Backup cloud',
+      run:function(){
+        return gradeWithPollinationsAI(testAnswer, testGuidance);
+      }
+    },
+    {
+      name:'Browser AI',
+      run:function(){
+        if(!browserAiAvailable) throw new Error('Browser AI not available');
+        return gradeWithBrowserAI(testAnswer, testGuidance);
+      }
+    },
+    {
+      name:'Ollama',
+      run:function(){
+        if(!ollamaAvailable) throw new Error('Ollama not available');
+        return gradeWithOllama(testAnswer, testGuidance);
+      }
+    },
+    {
+      name:'Mini marker',
+      run:function(){
+        return gradeWithMiniMarker(testAnswer, {
+          type:'short',
+          topic:'Debug',
+          question:'How can you tell a chemical change happened?',
+          keywords:['chemical','new substance'],
+          minMatches:1,
+          explanation:testGuidance
+        });
+      }
+    }
+  ];
+  aiConnectionTestResults = [];
+  for(var i=0;i<tests.length;i++){
+    try{
+      var result = await withTimeout(Promise.resolve().then(tests[i].run), 4500);
+      aiConnectionTestResults.push({name:tests[i].name, status:'ok', detail:result && result.explanation ? result.explanation : 'Connected'});
+    }catch(err){
+      aiConnectionTestResults.push({name:tests[i].name, status:'blocked', detail:err.message || String(err)});
+    }
+    renderDebugMenu();
+  }
+  aiConnectionTesting = false;
+  renderDebugMenu();
+}
+
+function aiConnectionTestHtml(){
+  if(!aiConnectionTestResults.length){
+    return '<pre>No test run yet. Press "Test AI connections".</pre>';
+  }
+  return '<dl class="debug-grid providers">'+aiConnectionTestResults.map(function(result){
+    var cls = result.status === 'ok' ? 'debug-ok' : (result.status === 'testing' ? '' : 'debug-off');
+    return '<div><dt>'+escapeHtml(result.name)+'</dt><dd class="'+cls+'">'+escapeHtml(result.status)+': '+escapeHtml(result.detail).slice(0,120)+'</dd></div>';
+  }).join('')+'</dl>';
+}
+
 function renderDebugMenu(){
   var panel = $('debugMenu');
   if(!panel) return;
@@ -2037,6 +2396,7 @@ function renderDebugMenu(){
   var aiStatus = getAiStatus();
   var points = totals.correct + ' / ' + totals.answered;
   var percent = totals.answered ? clamp(Math.round(totals.correct / totals.answered * 100),0,100) : 0;
+  var bankCounts = questionTypeCounts();
   panel.classList.remove('hidden');
   panel.innerHTML =
     '<div class="debug-head">' +
@@ -2047,6 +2407,7 @@ function renderDebugMenu(){
       '<button type="button" onclick="setAiEnabled('+(!aiEnabled)+')">'+(aiEnabled?'Disable AI providers':'Enable AI providers')+'</button>' +
       '<button type="button" onclick="skipToWordedQuestion()">Skip to worded question</button>' +
       '<button type="button" onclick="forceMiniMarkerForCurrent()">Test local marker</button>' +
+      '<button type="button" onclick="runAiConnectionTest()"'+(aiConnectionTesting?' disabled':'')+'>'+(aiConnectionTesting?'Testing AI...':'Test AI connections')+'</button>' +
     '</div>' +
     '<dl class="debug-grid">' +
       '<div><dt>Question</dt><dd>'+questionCount+' / history '+questionHistory.length+'</dd></div>' +
@@ -2062,10 +2423,13 @@ function renderDebugMenu(){
       '<div><dt>Last provider</dt><dd>'+escapeHtml(lastAiProvider || '-')+'</dd></div>' +
       '<div><dt>Periodic element</dt><dd>'+selectedElementNumber+' / '+escapeHtml(selectedPeriodicProperty)+'</dd></div>' +
       '<div><dt>Seen questions</dt><dd>'+Object.keys(seenQuestionKeys).length+' / '+questionBank.length+'</dd></div>' +
+      '<div><dt>Bank ratio</dt><dd>'+bankCounts.mcq+' MCQ / '+bankCounts.word+' word</dd></div>' +
       '<div><dt>Bank generated</dt><dd>'+generatedQuestionCount+'</dd></div>' +
     '</dl>' +
     '<h3>Providers</h3>' +
     '<dl class="debug-grid providers">'+providerDebugRows()+'</dl>' +
+    '<h3>AI Connection Test</h3>' +
+    aiConnectionTestHtml() +
     '<h3>Current Question</h3>' +
     '<pre>'+escapeHtml(item ? item.question : '-')+'</pre>' +
     '<h3>Model Answer</h3>' +
