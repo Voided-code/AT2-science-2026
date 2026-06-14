@@ -2409,7 +2409,7 @@ function hasConnectedAI(){
 async function gradeWithBestAI(text,item){
   var guidance = item.explanation || item.question;
   var providers = [];
-  if(aiEnabled && backendAiAvailable) providers.push({name:'Hosted AI', grade:function(){return gradeWithBackendAI(text, item);}, fail:function(){backendAiAvailable=false;}});
+  if(aiEnabled && backendAiAvailable) providers.push({name:'Hosted AI', grade:function(){return gradeWithBackendAI(text, item);}, fail:function(){}});
   if(aiEnabled && puterAiAvailable) providers.push({name:'Puter', grade:function(){return gradeWithPuterAI(text, guidance);}, fail:function(){puterAiAvailable=false;}});
   if(aiEnabled && pollinationsAvailable) providers.push({name:'Backup cloud', grade:function(){return gradeWithPollinationsAI(text, guidance);}, fail:function(){pollinationsAvailable=false;}});
   if(aiEnabled && browserAiAvailable) providers.push({name:'Browser AI', grade:function(){return gradeWithBrowserAI(text, guidance);}, fail:function(){browserAiAvailable=false;}});

@@ -61,6 +61,36 @@ function normaliseMark(result, maxMark){
   };
 }
 
+function words(text){
+  return String(text || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean);
+}
+
+function markWithLocalFallback(payload, reason){
+  const maxMark = payload.type === 'long' ? 5 : 3;
+  const answerWords = new Set(words(payload.answer).filter(word => word.length > 2));
+  const keywordHits = (payload.keywords || []).filter(keyword => {
+    const parts = words(keyword);
+    return parts.length ? parts.some(part => answerWords.has(part)) : answerWords.has(String(keyword).toLowerCase());
+  }).length;
+  const guidanceWords = words(payload.guidance).filter(word => word.length > 4);
+  const guidanceHits = guidanceWords.filter(word => answerWords.has(word)).length;
+  const lengthScore = clamp(answerWords.size / (payload.type === 'long' ? 28 : 10), 0, 1);
+  const keywordScore = (payload.keywords || []).length ? keywordHits / Math.max(2, Math.ceil(payload.keywords.length * 0.45)) : 0;
+  const guidanceScore = guidanceWords.length ? guidanceHits / Math.max(3, Math.ceil(guidanceWords.length * 0.25)) : 0;
+  const total = clamp((keywordScore * 0.45) + (guidanceScore * 0.35) + (lengthScore * 0.2), 0, 1);
+  const cap = answerWords.size <= 1 ? 1 : (answerWords.size <= 5 ? Math.min(2, maxMark) : maxMark);
+  const mark = Math.min(cap, clamp(Math.round(total * maxMark), 0, maxMark));
+  const missing = (payload.keywords || []).filter(keyword => !words(keyword).some(part => answerWords.has(part))).slice(0, 2);
+  return {
+    score: mark >= Math.ceil(maxMark * 0.6) ? 1 : 0,
+    mark,
+    maxMark,
+    explanation: 'Hosted AI was busy, so backup marking was used. ' + (missing.length ? 'Improve it by adding ' + missing.join(' and ') + ' and explaining why it matters.' : 'Improve it by making the because/therefore link clearer.'),
+    fallback: true,
+    fallbackReason: String(reason || 'hosted AI unavailable').slice(0, 120)
+  };
+}
+
 async function markWithGemini(payload){
   if(!GEMINI_API_KEY) throw new Error('GEMINI_API_KEY is not set');
   const maxMark = payload.type === 'long' ? 5 : 3;
@@ -140,8 +170,12 @@ async function markWithFreeAI(payload){
 }
 
 async function markWithBestHostedAI(payload){
-  if(GEMINI_API_KEY) return markWithGemini(payload);
-  return markWithFreeAI(payload);
+  try{
+    if(GEMINI_API_KEY) return markWithGemini(payload);
+    return markWithFreeAI(payload);
+  }catch(err){
+    return markWithLocalFallback(payload, err.message);
+  }
 }
 
 async function handleApi(req, res){
@@ -167,7 +201,7 @@ async function handleApi(req, res){
       }
       sendJson(res, 200, await markWithBestHostedAI(payload));
     }catch(err){
-      sendJson(res, 500, {error: err.message || 'AI marking failed'});
+      sendJson(res, 200, markWithLocalFallback({}, err.message || 'AI marking failed'));
     }
     return;
   }
