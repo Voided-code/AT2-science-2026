@@ -349,7 +349,12 @@ async function gradeWithBackendAI(answer,item){
     var detail = await res.text();
     throw new Error('Backend AI error '+res.status+': '+detail.slice(0, 120));
   }
-  return res.json();
+  var data = await res.json();
+  var hasOtherAiProvider = puterAiAvailable || pollinationsAvailable || browserAiAvailable || ollamaAvailable || OPENAI_API_KEY_PLAINTEXT || ENCRYPTED_OPENAI_KEY;
+  if(data && data.fallback && hasOtherAiProvider){
+    throw new Error('Hosted AI used backup marking, trying another AI provider');
+  }
+  return data;
 }
 
 async function checkPuterAiUsable(){
