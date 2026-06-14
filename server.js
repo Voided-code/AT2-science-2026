@@ -5,6 +5,8 @@ const path = require('path');
 const PORT = Number(process.env.PORT || 3000);
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
+const GROQ_MODEL = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
 const POLLINATIONS_ENDPOINT = 'https://text.pollinations.ai/openai';
 const ROOT = __dirname;
 
@@ -130,6 +132,46 @@ async function markWithGemini(payload){
   return normaliseMark(extractJson(text), maxMark);
 }
 
+async function markWithGroq(payload){
+  if(!GROQ_API_KEY) throw new Error('GROQ_API_KEY is not set');
+  const maxMark = payload.type === 'long' ? 5 : 3;
+  const prompt = [
+    'You are a fair but strict Year 8 Science teacher marking a student answer.',
+    'Topic: elements, compounds, properties, atomic structure, investigations, data trends, and the periodic table.',
+    'Question: ' + (payload.question || ''),
+    'Expected guidance/model answer: ' + (payload.guidance || ''),
+    'Keywords: ' + ((payload.keywords || []).join(', ') || '-'),
+    'Student answer: ' + (payload.answer || ''),
+    'Mark out of ' + maxMark + '. Award partial marks. Do not give full marks for one-word or vague answers.',
+    'Score is 1 only if the answer earns at least 60% of the marks.',
+    'Give feedback in two short sentences: what was right or missing, then one specific improvement.',
+    'Return only JSON exactly like {"score":0,"mark":1,"maxMark":' + maxMark + ',"explanation":"feedback"}'
+  ].join('\n\n');
+
+  const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer ' + GROQ_API_KEY},
+    body: JSON.stringify({
+      model: GROQ_MODEL,
+      messages: [
+        {role: 'system', content: 'Return only JSON. Be strict but fair for a Year 8 Science answer.'},
+        {role: 'user', content: prompt}
+      ],
+      temperature: 0,
+      max_tokens: 220
+    })
+  });
+  if(!response.ok){
+    const detail = await response.text();
+    throw new Error('Groq error ' + response.status + ': ' + detail.slice(0, 160));
+  }
+  const data = await response.json();
+  const text = data && data.choices && data.choices[0] && data.choices[0].message
+    ? data.choices[0].message.content
+    : '';
+  return normaliseMark(extractJson(text), maxMark);
+}
+
 async function markWithFreeAI(payload){
   const maxMark = payload.type === 'long' ? 5 : 3;
   const prompt = [
@@ -194,7 +236,8 @@ async function markWithFreeTextAI(payload){
 
 async function markWithBestHostedAI(payload){
   try{
-    if(GEMINI_API_KEY) return markWithGemini(payload);
+    if(GEMINI_API_KEY) return await markWithGemini(payload);
+    if(GROQ_API_KEY) return await markWithGroq(payload);
     try{
       return await markWithFreeAI(payload);
     }catch(firstErr){
@@ -217,9 +260,9 @@ async function handleApi(req, res){
   if(req.url === '/api/health'){
     sendJson(res, 200, {
       ok: true,
-      provider: GEMINI_API_KEY ? 'Gemini' : 'Free hosted AI',
-      model: GEMINI_API_KEY ? GEMINI_MODEL : 'pollinations/openai',
-      message: GEMINI_API_KEY ? 'Gemini backend ready' : 'Free hosted AI ready, no API key set'
+      provider: GEMINI_API_KEY ? 'Gemini' : GROQ_API_KEY ? 'Groq' : 'Free hosted AI',
+      model: GEMINI_API_KEY ? GEMINI_MODEL : GROQ_API_KEY ? GROQ_MODEL : 'pollinations/openai',
+      message: GEMINI_API_KEY ? 'Gemini backend ready' : GROQ_API_KEY ? 'Groq backend ready' : 'Free hosted AI ready, no API key set'
     });
     return;
   }

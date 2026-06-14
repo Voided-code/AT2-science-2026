@@ -2741,7 +2741,7 @@ async function refreshAiAvailabilityOnStartup(){
   renderDebugMenu();
   backendAiAvailable = await checkBackendAiAvailable();
   puterAiAvailable = !backendAiAvailable ? await checkPuterAiUsable() : false;
-  pollinationsAvailable = !backendAiAvailable && !puterAiAvailable ? await checkPollinationsAvailable() : false;
+  pollinationsAvailable = await checkPollinationsAvailable();
   browserAiAvailable = !backendAiAvailable && !puterAiAvailable && !pollinationsAvailable ? await checkBrowserAiAvailable() : false;
   ollamaAvailable = !backendAiAvailable && !puterAiAvailable && !pollinationsAvailable && !browserAiAvailable ? await checkOllamaAvailable() : false;
   apiKeyValid = !backendAiAvailable && !puterAiAvailable && !pollinationsAvailable && !browserAiAvailable && !ollamaAvailable ? await validateOpenAIKey() : false;
