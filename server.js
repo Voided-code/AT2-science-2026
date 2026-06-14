@@ -59,7 +59,7 @@ function normaliseMark(result, maxMark){
     score: mark >= Math.ceil(maxMark * 0.6) ? 1 : 0,
     mark,
     maxMark,
-    explanation: String(result.explanation || 'Marked by AI.').slice(0, 260)
+    explanation: String(result.explanation || 'Marked by AI.').slice(0, 420)
   };
 }
 
@@ -158,7 +158,7 @@ async function markWithGroq(payload){
         {role: 'user', content: prompt}
       ],
       temperature: 0,
-      max_tokens: 220
+      max_tokens: 350
     })
   });
   if(!response.ok){
