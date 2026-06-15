@@ -3142,6 +3142,16 @@ function setupDebugMenu(){
     if(event.key === '\\' || event.code === 'Backslash'){
       event.preventDefault();
       toggleDebugMenu();
+      return;
+    }
+    if(event.key === 'ArrowLeft'){
+      event.preventDefault();
+      prevQuestion();
+      return;
+    }
+    if(event.key === 'ArrowRight'){
+      event.preventDefault();
+      forwardQuestion();
     }
   });
 }
