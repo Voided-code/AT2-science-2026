@@ -331,7 +331,7 @@ async function checkBackendAiAvailable(){
   }
 }
 
-async function gradeWithBackendAI(answer,item){
+async function gradeWithBackendAI(answer,item,options){
   var maxMark = maxMarkForItem(item);
   var res = await withTimeout(fetch(BACKEND_AI_ENDPOINT, {
     method: 'POST',
@@ -351,7 +351,7 @@ async function gradeWithBackendAI(answer,item){
   }
   var data = await res.json();
   var hasOtherAiProvider = puterAiAvailable || pollinationsAvailable || browserAiAvailable || ollamaAvailable || OPENAI_API_KEY_PLAINTEXT || ENCRYPTED_OPENAI_KEY;
-  if(data && data.fallback && hasOtherAiProvider){
+  if(data && data.fallback && hasOtherAiProvider && !(options && options.acceptFallback)){
     throw new Error('Hosted AI used backup marking, trying another AI provider');
   }
   return data;
@@ -1803,6 +1803,35 @@ function markFromGradeResult(item,result,answer){
   };
 }
 
+function uniqueAnswerWordCount(answer){
+  var seen = {};
+  normalizeWords(answer).filter(function(word){ return word.length > 2; }).forEach(function(word){
+    seen[word] = true;
+  });
+  return Object.keys(seen).length;
+}
+
+function gradeResultWithSanityCheck(item,result,answer){
+  if(!result || result._aiProvider === 'Mini marker') return result;
+  var aiMark = markFromGradeResult(item,result,answer);
+  var maxMark = aiMark.maxMark;
+  var answerLooksDetailed = uniqueAnswerWordCount(answer) >= (item && item.type === 'long' ? 22 : 10);
+  if(aiMark.mark > 1 || !answerLooksDetailed) return result;
+  try{
+    var localResult = OfflineMarkerEngine.grade(answer,item);
+    var localMark = markFromGradeResult(item,localResult,answer);
+    if(localMark.mark >= Math.ceil(maxMark * 0.6) && localMark.mark > aiMark.mark + 1){
+      localResult.fallback = true;
+      localResult._aiProvider = 'Mini marker';
+      localResult.explanation = 'Hosted AI gave an inconsistent mark, so Mini Marker rechecked it. ' + localResult.explanation;
+      return localResult;
+    }
+  }catch(err){
+    console.log('Sanity recheck failed: '+err.message);
+  }
+  return result;
+}
+
 function normalizeWords(text){
   var extras = {
     atom:['atomic','element'],
@@ -2793,6 +2822,32 @@ async function gradeWithBestAI(text,item){
   throw new Error(errors.join(' | ') || 'No marker available');
 }
 
+function gradeLooksSuspiciouslyLow(item,result,text){
+  if(!result || result._aiProvider === 'Mini marker') return false;
+  var gradeMark = markFromGradeResult(item,result,text);
+  if(gradeMark.mark > 1) return false;
+  return uniqueAnswerWordCount(text) >= (item && item.type === 'long' ? 22 : 10);
+}
+
+async function resolveSuspiciousGrade(text,item,result){
+  if(!gradeLooksSuspiciouslyLow(item,result,text)) return result;
+  if(result._aiProvider !== 'Hosted AI' && backendAiAvailable){
+    try{
+      var hostedResult = await gradeWithBackendAI(text,item);
+      hostedResult._aiProvider = 'Hosted AI';
+      var hostedMark = markFromGradeResult(item,hostedResult,text);
+      var originalMark = markFromGradeResult(item,result,text);
+      if(hostedMark.mark > originalMark.mark){
+        hostedResult.explanation = 'Hosted AI rechecked a suspiciously low '+result._aiProvider+' mark. ' + (hostedResult.explanation || '');
+        return hostedResult;
+      }
+    }catch(err){
+      console.log('Hosted AI second opinion failed: '+err.message);
+    }
+  }
+  return gradeResultWithSanityCheck(item,result,text);
+}
+
 function submitShort(){
   if(answeredLast) return;
   var text=$('shortReply').value.trim();
@@ -2819,6 +2874,9 @@ function submitShort(){
     return;
   }
   gradeWithBestAI(text,item)
+    .then(function(result){
+      return resolveSuspiciousGrade(text,item,result);
+    })
     .then(function(result){
       var gradeMark = markFromGradeResult(item,result,text);
       item._correct = gradeMark.mark >= Math.ceil(gradeMark.maxMark * 0.6);
