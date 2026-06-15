@@ -533,7 +533,7 @@ async function clientGradeWithOpenAI(answer, guidance){
   try{ return JSON.parse(txt); } catch(e){ return { score:0, explanation: txt || 'API returned: '+txt.substring(0, 50) }; }
 }
 
-var questionBank = buildQuestionBank();
+var questionBank = (typeof QUESTION_BANK !== 'undefined' && QUESTION_BANK.length) ? QUESTION_BANK.slice() : buildQuestionBank();
 var totals={answered:0,correct:0};
 var currentQuestionIndex=0;
 var questionCount=0;
@@ -770,6 +770,367 @@ function buildQuestionBank(){
     } else {
       bank.push({topic:item.topic,outcomes:['SC4-PRT-01'],type:item.type,question:item.question,keywords:item.keywords,minMatches:item.minMatches,explanation:item.explanation});
     }
+  });
+
+  // ============================================================
+  // EXPANDED OUTCOME-ALIGNED BANK (targets all 14 outcomes)
+  // ============================================================
+
+  // --- Outcome 1: Elements in everyday objects ---
+  var o1=[
+    {o:'water',e:'hydrogen (H) and oxygen (O)',k:'hydrogen oxygen',exp:'Water is H₂O — two hydrogen atoms bonded to one oxygen atom.'},
+    {o:'table salt',e:'sodium (Na) and chlorine (Cl)',k:'sodium chlorine',exp:'Table salt is sodium chloride (NaCl), an ionic compound of sodium and chlorine.'},
+    {o:'air',e:'mainly nitrogen (N) and oxygen (O)',k:'nitrogen oxygen',exp:'Air is about 78% nitrogen and 21% oxygen.'},
+    {o:'steel',e:'iron (Fe) and carbon (C)',k:'iron carbon',exp:'Steel is an alloy of iron with small amounts of carbon added for strength.'},
+    {o:'brass',e:'copper (Cu) and zinc (Zn)',k:'copper zinc',exp:'Brass is an alloy of copper and zinc used for instruments and fittings.'},
+    {o:'glass',e:'silicon (Si) and oxygen (O)',k:'silicon oxygen',exp:'Most glass is silicon dioxide (SiO₂).'},
+    {o:'aluminium foil',e:'aluminium (Al)',k:'aluminium',exp:'Aluminium foil is pure aluminium, a lightweight malleable metal.'},
+    {o:'electrical wiring',e:'copper (Cu)',k:'copper',exp:'Copper is used for wiring because it conducts electricity better than most metals.'},
+    {o:'pencil lead',e:'carbon (C)',k:'carbon',exp:'Pencil lead is graphite, a soft form of carbon where layers slide over each other.'},
+    {o:'bones',e:'calcium (Ca) and phosphorus (P)',k:'calcium phosphorus',exp:'Bones are mainly calcium phosphate, giving them hardness.'},
+    {o:'fluoride toothpaste',e:'fluorine (F) compounds',k:'fluorine',exp:'Fluoride ions from fluorine compounds bond to tooth enamel to strengthen it.'},
+    {o:'party balloons',e:'helium (He)',k:'helium',exp:'Helium is a noble gas lighter than air, making balloons float.'},
+    {o:'bronze',e:'copper (Cu) and tin (Sn)',k:'copper tin',exp:'Bronze is an alloy of copper and tin, harder than either metal alone.'},
+    {o:'coins',e:'copper (Cu) and nickel (Ni)',k:'copper nickel',exp:'Most modern coins are alloys of copper and nickel for durability.'},
+    {o:'swimming pool water',e:'chlorine (Cl) compounds',k:'chlorine',exp:'Chlorine compounds kill bacteria in pool water to make it safe.'},
+    {o:'computer chips',e:'silicon (Si)',k:'silicon',exp:'Silicon is a semiconductor metalloid used to make microchips.'},
+    {o:'titanium implants',e:'titanium (Ti)',k:'titanium',exp:'Titanium is strong, lightweight and biocompatible — the body does not reject it.'},
+    {o:'neon signs',e:'neon (Ne)',k:'neon',exp:'Neon produces a red-orange glow when electricity passes through it.'},
+    {o:'photography film',e:'silver (Ag)',k:'silver',exp:'Silver compounds react to light and are used in traditional photographic film.'},
+    {o:'yellow fireworks',e:'sodium (Na) compounds',k:'sodium',exp:'Sodium compounds burn with a bright yellow-orange flame.'},
+    {o:'red fireworks',e:'strontium (Sr) compounds',k:'strontium',exp:'Strontium compounds produce a red flame in fireworks.'},
+    {o:'green fireworks',e:'barium (Ba) compounds',k:'barium',exp:'Barium compounds burn with a green flame.'},
+    {o:'fertilisers',e:'nitrogen (N) and phosphorus (P)',k:'nitrogen phosphorus',exp:'Plants need nitrogen for growth and phosphorus for roots and flowers.'},
+    {o:'galvanised iron',e:'iron (Fe) and zinc (Zn)',k:'iron zinc',exp:'Zinc coating on galvanised iron sacrificially corrodes to protect the iron underneath.'},
+    {o:'old thermometers',e:'mercury (Hg)',k:'mercury',exp:'Mercury is a liquid metal that expands evenly with temperature changes.'},
+    {o:'diamonds',e:'carbon (C)',k:'carbon',exp:'Diamonds are the hardest natural substance, made entirely of carbon atoms in a rigid lattice.'},
+    {o:'stainless steel cutlery',e:'iron (Fe), chromium (Cr) and nickel (Ni)',k:'iron chromium nickel',exp:'Chromium prevents rusting and nickel adds shine to stainless steel.'},
+    {o:'matches',e:'phosphorus (P) and sulfur (S)',k:'phosphorus sulfur',exp:'Match heads contain phosphorus or sulfur compounds that ignite from friction.'},
+    {o:'seawater',e:'sodium (Na) and chlorine (Cl) as the main dissolved elements',k:'sodium chlorine',exp:'Seawater contains dissolved sodium chloride and other mineral salts.'},
+    {o:'bronze statues',e:'copper (Cu) and tin (Sn)',k:'copper tin',exp:'Bronze is used for statues because it is durable and resists outdoor corrosion.'},
+    {o:'catalytic converters',e:'platinum (Pt) and palladium (Pd)',k:'platinum palladium',exp:'Platinum and palladium speed up reactions that break down harmful exhaust gases.'},
+    {o:'tungsten light bulb filaments',e:'tungsten (W)',k:'tungsten',exp:'Tungsten has the highest melting point of all metals, so it can glow without melting.'},
+    {o:'MRI machines',e:'helium (He) for cooling',k:'helium',exp:'Liquid helium keeps the superconducting magnets at very low temperatures.'},
+    {o:'rust',e:'iron (Fe) and oxygen (O)',k:'iron oxygen',exp:'Rust is iron oxide, formed when iron reacts with oxygen and water.'},
+    {o:'chalk',e:'calcium (Ca), carbon (C) and oxygen (O)',k:'calcium carbon oxygen',exp:'Chalk is calcium carbonate (CaCO₃), a compound of calcium, carbon and oxygen.'},
+    {o:'iodised table salt',e:'sodium (Na), chlorine (Cl) and iodine (I)',k:'sodium iodine',exp:'Iodine is added to table salt to prevent iodine deficiency.'},
+    {o:'baking soda',e:'sodium (Na), hydrogen (H), carbon (C) and oxygen (O)',k:'sodium carbon',exp:'Baking soda is sodium hydrogen carbonate (NaHCO₃).'},
+    {o:'copper plumbing pipes',e:'copper (Cu)',k:'copper',exp:'Copper is used in pipes because it resists corrosion and is easy to bend.'},
+    {o:'argon welding gas',e:'argon (Ar)',k:'argon',exp:'Argon is used as a shielding gas in welding because it does not react with hot metal.'},
+    {o:'lead-acid car batteries',e:'lead (Pb) and sulfur (S) compounds',k:'lead sulfur',exp:'Lead plates react with sulfuric acid in car batteries to store and release electrical energy.'}
+  ];
+  o1.forEach(function(d,i){
+    bank.push({topic:'Everyday elements',outcomes:['SC4-PRT-01'],type:'mcq',question:'Which elements are found in '+d.o+'?',choices:[d.e,'only gold (Au)','only helium (He) only','only fluorine (F)'],answer:0,explanation:d.exp});
+    bank.push({topic:'Everyday elements',outcomes:['SC4-PRT-01'],type:'mcq',question:'A student is testing a sample of '+d.o+'. Which element or elements would they find?',choices:[d.e,'only argon (Ar)','only uranium (U)','only krypton (Kr)'],answer:0,explanation:d.exp});
+    if(i%2===0) bank.push({topic:'Everyday elements',outcomes:['SC4-PRT-01'],type:'short',question:'Identify the elements found in '+d.o+' and explain why those elements make it suitable for its purpose. Give 1-2 sentences.',keywords:d.k.split(' ').concat(['element','because','contains']),minMatches:2,explanation:d.exp});
+    if(i%4===0) bank.push({topic:'Everyday elements',outcomes:['SC4-PRT-01'],type:'long',question:'Identify the elements in '+d.o+', explain how their properties relate to its use, and give one other example of where a similar element can be found. Write 4-5 sentences.',keywords:d.k.split(' ').concat(['element','property','use','example']),minMatches:3,explanation:d.exp+' The properties of these elements explain why they are present in this substance.'});
+  });
+
+  // --- Outcome 2: Physical properties investigation ---
+  var o2=[
+    {prop:'electrical conductivity',test:'connect the sample in a simple circuit with a battery and bulb — metals light the bulb',metalR:'lights the bulb',nonmetalR:'the bulb stays dark',except:'graphite (a non-metal) also conducts'},
+    {prop:'malleability',test:'strike the sample with a hammer — metals flatten, non-metals shatter',metalR:'flattens without cracking',nonmetalR:'shatters or crumbles',except:'some metals such as bismuth are brittle'},
+    {prop:'lustre',test:'observe a fresh cut surface under light — metals are shiny, non-metals are dull',metalR:'shiny and reflective',nonmetalR:'dull and non-reflective',except:'iodine crystals appear slightly lustrous'},
+    {prop:'ductility',test:'attempt to draw the sample into a wire — metals can be drawn, non-metals cannot',metalR:'can be drawn into thin wire',nonmetalR:'breaks or crumbles when pulled',except:'silicon can be drawn under special conditions'},
+    {prop:'thermal conductivity',test:'heat one end and time how long the other end warms — metals conduct heat quickly',metalR:'conducts heat rapidly along its length',nonmetalR:'heat travels slowly or not at all',except:'diamond is an excellent thermal conductor despite being a non-metal'},
+    {prop:'hardness',test:'try to scratch the surface with a coin — harder materials are usually metals',metalR:'resists scratching by most common materials',nonmetalR:'often soft and easily scratched',except:'diamond (carbon) is the hardest natural substance'},
+    {prop:'melting point',test:'heat the sample carefully and record when it melts — most metals melt at high temperatures',metalR:'requires very high temperature to melt',nonmetalR:'often melts at much lower temperature',except:'mercury melts at −39 °C yet is a metal'},
+    {prop:'density',test:'measure mass and volume, calculate density = mass/volume — metals are typically denser',metalR:'high density — feels heavy for its size',nonmetalR:'generally lower density than metals',except:'lithium and sodium are metals with lower density than water'},
+    {prop:'reaction with dilute acid',test:'add the sample to dilute hydrochloric acid — reactive metals produce bubbles of hydrogen',metalR:'fizzes and produces hydrogen gas',nonmetalR:'little or no visible reaction',except:'gold and platinum are metals that do not react with dilute acid'},
+    {prop:'reaction with water',test:'place a small piece in water — reactive metals react vigorously',metalR:'reacts, sometimes violently, releasing hydrogen',nonmetalR:'usually shows little or no reaction',except:'sodium and potassium react explosively with water'},
+    {prop:'magnetism',test:'hold a strong magnet near the sample — iron, nickel and cobalt are attracted',metalR:'iron, nickel and cobalt are attracted to the magnet',nonmetalR:'not attracted to the magnet',except:'most metals including copper and aluminium are not magnetic'},
+    {prop:'state at room temperature',test:'observe whether the sample is solid, liquid or gas without heating — most metals are solid',metalR:'solid at room temperature',nonmetalR:'can be solid, liquid or gas at room temperature',except:'mercury is a liquid metal at room temperature'},
+    {prop:'sound when struck',test:'tap the sample with a metal rod and listen — metals ring, non-metals thud',metalR:'produces a clear ringing sound',nonmetalR:'produces a dull thud',except:'some alloys produce different sounds depending on composition'},
+    {prop:'reaction with oxygen',test:'heat the sample in air and observe — metals form oxides, many burn brightly',metalR:'burns brightly or forms an oxide layer',nonmetalR:'some burn with coloured flames, others do not react',except:'noble gas elements do not react with oxygen at all'},
+    {prop:'semiconductor behaviour',test:'test conductivity at different temperatures or light levels — metalloids change behaviour',metalR:'always conducts at room temperature',nonmetalR:'does not conduct at room temperature',except:'silicon and germanium conduct better as temperature rises'},
+    {prop:'solubility in water',test:'stir the sample in water and observe — most metals do not dissolve',metalR:'does not dissolve unless it reacts chemically',nonmetalR:'some non-metal compounds dissolve readily',except:'sodium metal reacts with and appears to dissolve in water'},
+    {prop:'appearance under a microscope',test:'examine a polished surface — metals show a crystalline grain structure',metalR:'shows ordered grain or crystal structure',nonmetalR:'often amorphous or shows different structure',except:'graphite shows a layered plate structure under a microscope'},
+    {prop:'brittleness',test:'apply increasing force and observe whether the material bends or snaps suddenly',metalR:'bends before breaking under force (ductile)',nonmetalR:'snaps suddenly without bending first (brittle)',except:'cast iron is a metal that is brittle compared with most metals'},
+    {prop:'boiling point',test:'heat carefully and record when the sample changes from liquid to gas',metalR:'very high boiling point',nonmetalR:'often boils at a much lower temperature',except:'bromine is a non-metal that boils at only 59 °C'},
+    {prop:'mixed properties (metalloid)',test:'test conductivity, malleability and lustre — metalloids show some properties of both metals and non-metals',metalR:'has both metallic and non-metallic properties',nonmetalR:'shows more non-metallic than metallic properties',except:'silicon conducts electricity only under certain conditions'}
+  ];
+  o2.forEach(function(d,i){
+    bank.push({topic:'Physical properties',outcomes:['SC4-PRT-01','SC5-WS-01'],type:'mcq',question:'A student tests a sample for '+d.prop+'. Which result would show it is most likely a metal?',choices:[d.metalR,d.nonmetalR,'changes colour only','dissolves completely in acid'],answer:0,explanation:'When testing for '+d.prop+', metals typically show: '+d.metalR+'. Note: '+d.except+'.'});
+    bank.push({topic:'Physical properties',outcomes:['SC4-PRT-01','SC5-WS-01'],type:'mcq',question:'How would a student test a sample for '+d.prop+'?',choices:[d.test,'measure its atomic number','use a mass spectrometer','add universal indicator'],answer:0,explanation:'To test for '+d.prop+': '+d.test+'.'});
+    bank.push({topic:'Physical properties',outcomes:['SC4-PRT-01','SC5-WS-01'],type:'mcq',question:'When testing for '+d.prop+', a sample gives the result: '+d.nonmetalR+'. What does this suggest?',choices:['The sample is likely a non-metal or metalloid','The sample is definitely a transition metal','The sample has no protons','The result is always caused by high density'],answer:0,explanation:'A result of '+d.nonmetalR+' for '+d.prop+' suggests the sample is a non-metal or metalloid. '+d.except+'.'});
+    if(i%2===0) bank.push({topic:'Physical properties',outcomes:['SC4-PRT-01','SC5-WS-01'],type:'short',question:'Describe how a student could test an unknown sample for '+d.prop+' and explain what a metal result would look like. Give 1-2 sentences.',keywords:['test',d.prop.split(' ')[0],'metal','result','observe'],minMatches:2,explanation:'To test for '+d.prop+': '+d.test+'. A metal gives the result: '+d.metalR+'.'});
+    if(i%4===0) bank.push({topic:'Physical properties',outcomes:['SC4-PRT-01','SC5-WS-01'],type:'long',question:'A student is given an unknown solid and asked to determine whether it is a metal, non-metal or metalloid using a test for '+d.prop+'. Write 4-5 sentences explaining the test method, the expected result for each type, and what exception the student should keep in mind.',keywords:['test',d.prop.split(' ')[0],'metal','non-metal','metalloid','result','exception'],minMatches:3,explanation:'Testing for '+d.prop+': '+d.test+'. A metal gives: '+d.metalR+'. A non-metal gives: '+d.nonmetalR+'. Exception: '+d.except+'.'});
+  });
+
+  // --- Outcome 3: Properties relate to uses ---
+  var o3=[
+    {mat:'copper',prop:'excellent electrical conductivity',use:'electrical wiring',why:'electricity flows through copper with very little resistance'},
+    {mat:'aluminium',prop:'low density and corrosion resistance',use:'aircraft and drink cans',why:'its low mass reduces fuel costs and it does not corrode easily'},
+    {mat:'gold',prop:'unreactive and conducts electricity',use:'jewellery and electronic connectors',why:'it stays shiny and reliable over long periods without corroding'},
+    {mat:'iron',prop:'strength and hardness when made into steel',use:'structural beams and bridges',why:'steel made from iron and carbon can bear enormous loads'},
+    {mat:'silicon',prop:'semiconductor — conductivity can be switched on and off',use:'computer chips and solar cells',why:'controllable conductivity lets it switch electrical signals in circuits'},
+    {mat:'titanium',prop:'high strength-to-mass ratio and biocompatible',use:'aircraft parts and medical implants',why:'it is strong and light, and the body does not reject it'},
+    {mat:'tungsten',prop:'very high melting point (3422 °C)',use:'light bulb filaments and cutting tools',why:'it can glow at very high temperatures without melting'},
+    {mat:'mercury',prop:'liquid at room temperature and expands uniformly',use:'thermometers (historical) and switches',why:'it flows easily in tubes and expands evenly with temperature'},
+    {mat:'diamond (carbon)',prop:'hardness — the hardest natural substance',use:'drill tips and cutting tools',why:'nothing naturally harder can scratch it, so it cuts any other material'},
+    {mat:'graphite (carbon)',prop:'soft layered structure — layers slide easily',use:'pencil leads and lubricants',why:'carbon layers slide over each other, depositing marks and reducing friction'},
+    {mat:'helium',prop:'very low density and non-flammable',use:'weather balloons and MRI cooling',why:'it is the second lightest element and does not catch fire'},
+    {mat:'neon',prop:'produces red-orange glow in electrical discharge',use:'neon signs and gas lasers',why:'electrons returning to lower energy levels release visible red-orange light'},
+    {mat:'steel',prop:'greater strength and hardness than pure iron',use:'buildings, bridges and vehicles',why:'the carbon in steel makes it much stronger than pure iron'},
+    {mat:'stainless steel',prop:'corrosion resistance from chromium',use:'cutlery and surgical instruments',why:'chromium forms a protective oxide layer that stops the steel from rusting'},
+    {mat:'brass',prop:'corrosion resistance and acoustic properties',use:'musical instruments and plumbing fittings',why:'brass does not corrode easily and vibrates to produce good sound'},
+    {mat:'bronze',prop:'harder than copper and resistant to corrosion',use:'statues, medals and boat fittings',why:'bronze is durable outdoors and was one of the first alloys used by humans'},
+    {mat:'platinum',prop:'unreactive and catalytically active',use:'catalytic converters and laboratory crucibles',why:'it does not react with most substances and speeds up important reactions'},
+    {mat:'silver',prop:'the best electrical conductor of all metals',use:'specialist electronics and solar panels',why:'silver conducts electricity better than copper but is expensive'},
+    {mat:'argon',prop:'completely unreactive noble gas',use:'welding shield gas and incandescent light bulbs',why:'it prevents the hot metal from reacting with oxygen during welding'},
+    {mat:'zinc',prop:'sacrificial corrosion — corrodes before iron',use:'galvanising iron to prevent rust',why:'zinc corrodes before the iron does, protecting the iron underneath'},
+    {mat:'calcium',prop:'forms strong hard compounds with other elements',use:'cement, plaster and bone supplements',why:'calcium carbonate and calcium phosphate are hard structural materials'},
+    {mat:'phosphorus',prop:'reacts to release light and heat, essential for plants',use:'matches and fertilisers',why:'white phosphorus ignites easily; phosphorus compounds promote plant root growth'},
+    {mat:'chlorine',prop:'kills bacteria and acts as a bleaching agent',use:'water purification and disinfectants',why:'chlorine reacts with and destroys microorganisms in water'},
+    {mat:'sulfur',prop:'used in vulcanisation and acid manufacture',use:'rubber tyres and industrial chemicals',why:'sulfur cross-links rubber chains, making the rubber harder and more durable'},
+    {mat:'carbon fibre',prop:'extremely high strength-to-mass ratio',use:'racing cars, aircraft and sports equipment',why:'carbon fibre composites are lighter than steel but stronger for their weight'}
+  ];
+  o3.forEach(function(d,i){
+    bank.push({topic:'Properties and uses',outcomes:['SC4-PRT-01'],type:'mcq',question:'Why is '+d.mat+' particularly useful for '+d.use+'?',choices:['Because it has '+d.prop,'Because it is the most abundant element','Because it is always a liquid at room temperature','Because it has no electrons'],answer:0,explanation:d.mat[0].toUpperCase()+d.mat.slice(1)+' is used for '+d.use+' because '+d.why+'.'});
+    bank.push({topic:'Properties and uses',outcomes:['SC4-PRT-01'],type:'mcq',question:'Which property of '+d.mat+' makes it most suitable for '+d.use+'?',choices:[d.prop,'high radioactivity','ability to become a gas','high solubility in water'],answer:0,explanation:'The key property of '+d.mat+' for '+d.use+' is: '+d.prop+'. '+d.mat[0].toUpperCase()+d.mat.slice(1)+' '+d.why+'.'});
+    bank.push({topic:'Properties and uses',outcomes:['SC4-PRT-01'],type:'mcq',question:'A student wonders why '+d.mat+' is used for '+d.use+' and not a different material. Which answer best explains this?',choices:[d.mat[0].toUpperCase()+d.mat.slice(1)+' has '+d.prop,'All materials are equally suitable for '+d.use,'The atomic number of '+d.mat+' is always zero','The density of '+d.mat+' is always the same as water'],answer:0,explanation:d.mat[0].toUpperCase()+d.mat.slice(1)+' is chosen because '+d.why+'.'});
+    if(i%2===0) bank.push({topic:'Properties and uses',outcomes:['SC4-PRT-01'],type:'short',question:'Explain why '+d.mat+' is well-suited for '+d.use+'. Give 1-2 sentences using a specific property.',keywords:[d.mat.split(' ')[0].toLowerCase(),d.prop.split(' ')[0].toLowerCase(),'property','use','because','suitable'],minMatches:2,explanation:d.mat[0].toUpperCase()+d.mat.slice(1)+' is used for '+d.use+' because it has '+d.prop+'. '+d.mat[0].toUpperCase()+d.mat.slice(1)+' '+d.why+'.'});
+    if(i%3===0) bank.push({topic:'Properties and uses',outcomes:['SC4-PRT-01'],type:'long',question:'Explain how the properties of '+d.mat+' make it suitable for '+d.use+'. Write 4-5 sentences identifying the key property, explaining why that property matters for this use, and suggesting one reason why a cheaper or different material is not used instead.',keywords:[d.mat.split(' ')[0].toLowerCase(),d.prop.split(' ')[0].toLowerCase(),'property','use','because','suitable','alternative'],minMatches:3,explanation:d.mat[0].toUpperCase()+d.mat.slice(1)+' is used for '+d.use+' because it has '+d.prop+'. '+d.mat[0].toUpperCase()+d.mat.slice(1)+' '+d.why+'. Alternative materials lack this specific property combination.'});
+  });
+
+  // --- Outcome 4: Atom as smallest unit ---
+  var o4=[
+    {scenario:'cutting gold in half repeatedly',q:'If you kept cutting gold in half, what is the smallest piece that would still have the properties of gold?',a:'a single gold atom',e:'The atom is the smallest unit of an element that retains its properties. Smaller particles (protons, electrons) are not gold.'},
+    {scenario:'splitting a water molecule',q:'If a water molecule (H₂O) is split into individual atoms, what remains?',a:'hydrogen and oxygen atoms — no longer water',e:'Splitting water gives separate hydrogen and oxygen atoms, which have completely different properties from water.'},
+    {scenario:'is there anything smaller than an atom of an element',q:'Can you divide a copper atom and still have copper?',a:'No — dividing the atom gives subatomic particles, which are not copper',e:'Subatomic particles do not carry the identity or properties of copper. Only the whole atom does.'},
+    {scenario:'why atoms of different elements are different',q:'An iron atom and a sulfur atom are both atoms. What makes them different elements?',a:'they have different numbers of protons in the nucleus',e:'The number of protons (atomic number) uniquely identifies each element.'},
+    {scenario:'molecule vs atom',q:'What is the difference between an atom and a molecule?',a:'a molecule contains two or more atoms bonded together; an atom is a single particle',e:'An atom is the smallest unit of an element. A molecule forms when atoms bond together, possibly forming a compound.'},
+    {scenario:'diamond vs graphite',q:'Diamond and graphite are both made entirely of carbon atoms. How can they have such different properties?',a:'the carbon atoms are arranged differently, giving different structures and properties',e:'Atomic arrangement determines bulk properties. Diamond has a rigid 3D lattice; graphite has sliding layers.'},
+    {scenario:'element definition',q:'A substance is made of only one type of atom. What is the correct classification?',a:'it is an element',e:'An element is a pure substance containing only one type of atom.'},
+    {scenario:'compound definition',q:'A substance is made of hydrogen and oxygen atoms chemically bonded together. What is it?',a:'a compound (specifically water, H₂O)',e:'A compound is a pure substance containing two or more types of atoms bonded together in fixed ratios.'},
+    {scenario:'why atoms exist',q:'Why is the atom described as the "building block" of matter?',a:'all matter is made of atoms that combine in different ways to form all substances',e:'Atoms combine in different arrangements to form every substance around us.'},
+    {scenario:'atoms and mixtures',q:'Salt dissolved in water contains both sodium, chlorine and water molecules. Is this a mixture, element or compound?',a:'a mixture — the salt and water are not chemically bonded to each other',e:'A mixture contains substances that are not chemically bonded. Here, salt molecules are just dispersed in water molecules.'},
+    {scenario:'proton defines element',q:'An atom has 6 protons. What element is it, regardless of how many neutrons it has?',a:'carbon — the number of protons alone defines the element',e:'Every carbon atom has exactly 6 protons. Changing neutrons creates isotopes but does not change the element.'},
+    {scenario:'atoms cannot be seen',q:'Why could scientists not directly see atoms for most of history?',a:'atoms are far too small for ordinary light or simple instruments to detect',e:'Atoms are about 0.1 nanometres wide. Electron microscopes, developed in the 20th century, can now image them indirectly.'},
+    {scenario:'Dalton solid sphere',q:'Dalton described atoms as solid spheres. What was later found to be inside the atom?',a:'a nucleus containing protons and neutrons, with electrons in shells around it',e:'Later experiments showed atoms are mostly empty space with a small dense nucleus and electrons in shells.'},
+    {scenario:'alloy not a compound',q:'Steel is made of iron and carbon, but the atoms are not chemically bonded in fixed ratios. Is steel a compound or mixture?',a:'a mixture (an alloy) — the proportions can vary and atoms are not in fixed ratios',e:'An alloy is a mixture of metals. The components are not chemically bonded in fixed ratios.'},
+    {scenario:'smallest particle keeping element identity',q:'Which particle is the smallest unit of an element that retains the properties of that element?',a:'an atom',e:'The atom is defined as the smallest unit of an element that retains its chemical properties.'}
+  ];
+  o4.forEach(function(d,i){
+    bank.push({topic:'Atomic structure',outcomes:['SC4-PRT-01'],type:'mcq',question:d.q,choices:[d.a,'a proton alone','an electron alone','a neutron alone'],answer:0,explanation:d.e});
+    if(i%2===0) bank.push({topic:'Atomic structure',outcomes:['SC4-PRT-01'],type:'short',question:'Explain the following idea in your own words: '+d.scenario+'. Give 1-2 sentences.',keywords:['atom','element','properties','smallest','particle'],minMatches:2,explanation:d.e});
+    if(i%5===0) bank.push({topic:'Atomic structure',outcomes:['SC4-PRT-01'],type:'long',question:'A student asks: "'+d.q+'" Write 4-5 sentences explaining the answer, what would happen at the atomic level, and how this relates to the definition of an element.',keywords:['atom','element','properties','smallest','particle','nucleus','proton'],minMatches:3,explanation:d.e});
+  });
+
+  // --- Outcome 5: Subatomic particles ---
+  var o5q=[
+    {q:'Which subatomic particle has a positive charge?',a:'proton',w:['electron','neutron','photon'],e:'Protons are positively charged particles found in the nucleus.'},
+    {q:'Which subatomic particle has a negative charge?',a:'electron',w:['proton','neutron','nucleus'],e:'Electrons are negatively charged and found in shells around the nucleus.'},
+    {q:'Which subatomic particle has no charge (is neutral)?',a:'neutron',w:['proton','electron','ion'],e:'Neutrons are electrically neutral and found in the nucleus.'},
+    {q:'Where are protons and neutrons found in the atom?',a:'in the nucleus at the centre of the atom',w:['in the outer shells','equally throughout the atom','only in the electron cloud'],e:'Protons and neutrons are both in the nucleus.'},
+    {q:'Where are electrons found in the atom?',a:'in shells (energy levels) around the nucleus',w:['inside the nucleus','randomly scattered','only on the outer edge of the atom'],e:'Electrons occupy shells around the nucleus.'},
+    {q:'Which two particles have approximately equal mass?',a:'protons and neutrons — each about 1 atomic mass unit',w:['protons and electrons','electrons and neutrons','neutrons and photons'],e:'Protons and neutrons have similar mass (~1 amu). Electrons are about 1/1836 the mass of a proton.'},
+    {q:'How does the mass of an electron compare to a proton?',a:'an electron is much lighter — about 1/1836 the mass of a proton',w:['they have exactly equal mass','an electron is heavier','an electron has twice the mass'],e:'Electrons have negligible mass compared to protons and neutrons.'},
+    {q:'A neutral atom has 8 protons. How many electrons does it have?',a:'8 electrons — equal to the number of protons in a neutral atom',w:['4 electrons','16 electrons','0 electrons'],e:'In a neutral atom, the number of electrons equals the number of protons.'},
+    {q:'If a proton has charge +1 and an electron has charge −1, what is the overall charge of a neutral atom?',a:'zero — positive and negative charges cancel exactly',w:['positive +1','negative −1','it depends on the neutrons'],e:'In a neutral atom, equal numbers of protons and electrons make the overall charge zero.'},
+    {q:'What happens to the charge of an atom if it loses one electron?',a:'it becomes positively charged (+1 ion)',w:['it becomes negatively charged','it loses a proton too','it becomes neutral again'],e:'Removing an electron leaves more protons than electrons, giving a net positive charge.'},
+    {q:'What happens to the charge of an atom if it gains one electron?',a:'it becomes negatively charged (−1 ion)',w:['it becomes positively charged','it gains a proton','it splits into two atoms'],e:'Gaining an electron gives more electrons than protons, resulting in a net negative charge.'},
+    {q:'Which particle determines the atomic number of an element?',a:'the number of protons',w:['the number of neutrons','the number of electrons','the number of shells'],e:'Atomic number equals the number of protons. This uniquely identifies the element.'},
+    {q:'Which particles contribute to the mass number of an atom?',a:'protons and neutrons (both found in the nucleus)',w:['only protons','only neutrons','electrons and protons'],e:'Mass number = number of protons + number of neutrons. Electrons have negligible mass.'},
+    {q:'An atom of sodium has 11 protons and 12 neutrons. What is its mass number?',a:'23 (protons + neutrons = 11 + 12)',w:['11','12','1'],e:'Mass number = protons + neutrons = 11 + 12 = 23.'},
+    {q:'How many protons does helium have?',a:'2 protons (atomic number 2)',w:['1','4','8'],e:'Helium has atomic number 2, so it has 2 protons.'},
+    {q:'An atom has 17 protons and 17 electrons. What element is it?',a:'chlorine (atomic number 17)',w:['fluorine','bromine','argon'],e:'Atomic number 17 is chlorine. With equal protons and electrons, it is neutral.'},
+    {q:'Which particle is exchanged or transferred during ionic bonding?',a:'electron',w:['proton','neutron','nucleus'],e:'Ionic bonds form when electrons are transferred from one atom to another.'},
+    {q:'A scientist says "the nucleus is positive." Why?',a:'because it contains protons, which are positively charged, and neutrons, which have no charge',w:['because electrons are inside the nucleus','because the nucleus has negative neutrons','because atoms always have positive nuclei'],e:'The nucleus contains protons (+1 each) and neutrons (0). The overall nuclear charge is positive.'},
+    {q:'Which subatomic particle is found outside the nucleus?',a:'electron',w:['proton','neutron','quark'],e:'Electrons are found in shells or energy levels surrounding the nucleus.'},
+    {q:'What is the relative charge of a neutron compared to a proton?',a:'the neutron has no charge (0), the proton has charge +1',w:['they have the same charge','neutron is −1 and proton is +1','neutron is +1 and proton is −1'],e:'Neutrons are neutral (charge = 0). Protons carry a +1 charge.'}
+  ];
+  o5q.forEach(function(d){
+    bank.push({topic:'Atomic structure',outcomes:['SC4-PRT-01'],type:'mcq',question:d.q,choices:[d.a].concat(d.w),answer:0,explanation:d.e});
+  });
+  bank.push({topic:'Atomic structure',outcomes:['SC4-PRT-01'],type:'short',question:'Compare the three subatomic particles in terms of charge, mass and location in the atom. Give 2-3 sentences.',keywords:['proton','neutron','electron','charge','nucleus','shell','mass'],minMatches:4,explanation:'Protons (+1 charge, ~1 amu, in nucleus), neutrons (0 charge, ~1 amu, in nucleus), electrons (−1 charge, negligible mass, in shells around nucleus).'});
+  bank.push({topic:'Atomic structure',outcomes:['SC4-PRT-01'],type:'short',question:'Explain why a neutral atom has no overall charge despite containing charged particles.',keywords:['proton','electron','positive','negative','equal','cancel','neutral'],minMatches:3,explanation:'In a neutral atom, the number of protons (positive) equals the number of electrons (negative). The charges cancel and the overall charge is zero.'});
+  bank.push({topic:'Atomic structure',outcomes:['SC4-PRT-01'],type:'long',question:'Describe the three subatomic particles, including their charge, relative mass and location in the atom. Write 4-5 sentences and explain what would happen to the charge of the atom if it lost or gained an electron.',keywords:['proton','neutron','electron','nucleus','shell','charge','mass','ion','positive','negative'],minMatches:5,explanation:'Protons (+1, ~1 amu) and neutrons (0, ~1 amu) are in the nucleus. Electrons (−1, negligible mass) are in shells. In a neutral atom protons = electrons. Losing an electron gives a positive ion; gaining one gives a negative ion.'});
+  bank.push({topic:'Atomic structure',outcomes:['SC4-PRT-01'],type:'long',question:'A student says all three subatomic particles have the same mass. Correct this misconception and explain the relative masses and locations of each particle. Write 4-5 sentences.',keywords:['proton','neutron','electron','mass','nucleus','shell','amu','lighter'],minMatches:4,explanation:'Protons and neutrons each have a mass of approximately 1 amu and are found in the nucleus. Electrons have negligible mass (about 1/1836 of a proton) and are found in shells. Most of the atom\'s mass is in the nucleus.'});
+
+  // --- Outcome 6: Planetary (Bohr) model – location, charge, mass ---
+  var o6elem=[
+    {n:1,name:'hydrogen',config:'1',shells:1,outerE:1,period:1,neutrons:0},
+    {n:2,name:'helium',config:'2',shells:1,outerE:2,period:1,neutrons:2},
+    {n:3,name:'lithium',config:'2,1',shells:2,outerE:1,period:2,neutrons:4},
+    {n:4,name:'beryllium',config:'2,2',shells:2,outerE:2,period:2,neutrons:5},
+    {n:5,name:'boron',config:'2,3',shells:2,outerE:3,period:2,neutrons:6},
+    {n:6,name:'carbon',config:'2,4',shells:2,outerE:4,period:2,neutrons:6},
+    {n:7,name:'nitrogen',config:'2,5',shells:2,outerE:5,period:2,neutrons:7},
+    {n:8,name:'oxygen',config:'2,6',shells:2,outerE:6,period:2,neutrons:8},
+    {n:9,name:'fluorine',config:'2,7',shells:2,outerE:7,period:2,neutrons:10},
+    {n:10,name:'neon',config:'2,8',shells:2,outerE:8,period:2,neutrons:10},
+    {n:11,name:'sodium',config:'2,8,1',shells:3,outerE:1,period:3,neutrons:12},
+    {n:12,name:'magnesium',config:'2,8,2',shells:3,outerE:2,period:3,neutrons:12},
+    {n:13,name:'aluminium',config:'2,8,3',shells:3,outerE:3,period:3,neutrons:14},
+    {n:14,name:'silicon',config:'2,8,4',shells:3,outerE:4,period:3,neutrons:14},
+    {n:15,name:'phosphorus',config:'2,8,5',shells:3,outerE:5,period:3,neutrons:16},
+    {n:16,name:'sulfur',config:'2,8,6',shells:3,outerE:6,period:3,neutrons:16},
+    {n:17,name:'chlorine',config:'2,8,7',shells:3,outerE:7,period:3,neutrons:18},
+    {n:18,name:'argon',config:'2,8,8',shells:3,outerE:8,period:3,neutrons:22}
+  ];
+  o6elem.forEach(function(el){
+    bank.push({topic:'Atomic structure',outcomes:['SC4-PRT-01'],type:'mcq',question:'In the planetary model, how many electrons does a neutral '+el.name+' atom have, and how are they arranged in shells?',choices:[el.n+' electrons arranged '+el.config,(el.n+2)+' electrons in one shell',el.n+' electrons all in the outer shell only',el.n+' protons and 0 electrons'],answer:0,explanation:el.name[0].toUpperCase()+el.name.slice(1)+' (atomic number '+el.n+') has '+el.n+' electrons arranged '+el.config+' in shells.'});
+    bank.push({topic:'Atomic structure',outcomes:['SC4-PRT-01'],type:'mcq',question:'How many electron shells does a '+el.name+' atom have in the planetary model?',choices:[String(el.shells),String(el.shells+1),String(el.n),'1 only'],answer:0,explanation:el.name[0].toUpperCase()+el.name.slice(1)+' is in period '+el.period+', so it has '+el.shells+' electron shell'+(el.shells>1?'s':'')+'. Electron arrangement: '+el.config+'.'});
+    bank.push({topic:'Atomic structure',outcomes:['SC4-PRT-01'],type:'mcq',question:'How many electrons are in the outer shell of a '+el.name+' atom?',choices:[String(el.outerE),String(el.n),'8 always','2 always'],answer:0,explanation:el.name[0].toUpperCase()+el.name.slice(1)+' has electron arrangement '+el.config+', so its outer shell contains '+el.outerE+' electron'+(el.outerE>1?'s':'')+'.'});
+    if(el.n%3===0) bank.push({topic:'Atomic structure',outcomes:['SC4-PRT-01'],type:'short',question:'Describe the structure of a neutral '+el.name+' atom using the planetary model, including the number of protons, neutrons, electrons and how the electrons are arranged. Give 2-3 sentences.',keywords:['proton','neutron','electron','shell','nucleus',el.name],minMatches:3,explanation:el.name[0].toUpperCase()+el.name.slice(1)+' has '+el.n+' protons and approximately '+el.neutrons+' neutrons in the nucleus. A neutral atom has '+el.n+' electrons arranged '+el.config+' in '+el.shells+' shell'+(el.shells>1?'s':'')+'.'});
+    if(el.n%6===0) bank.push({topic:'Atomic structure',outcomes:['SC4-PRT-01'],type:'long',question:'Draw and describe a planetary model of a '+el.name+' atom. Write 4-5 sentences explaining the location and number of protons, neutrons and electrons, the shell arrangement, and what this tells you about its period and group.',keywords:['proton','neutron','electron','shell','nucleus','period','group',el.name],minMatches:4,explanation:el.name[0].toUpperCase()+el.name.slice(1)+' (atomic number '+el.n+') has '+el.n+' protons and '+el.neutrons+' neutrons in the nucleus with '+el.n+' electrons in shells '+el.config+'. It is in period '+el.period+'.'});
+  });
+
+  // --- Outcome 7: First 18 elements – atomic structure changes with atomic number ---
+  o6elem.forEach(function(el,i){
+    bank.push({topic:'Atomic structure',outcomes:['SC4-PRT-01'],type:'mcq',question:'Which element has atomic number '+el.n+'?',choices:[el.name,o6elem[(i+1)%18].name,o6elem[(i+2)%18].name,o6elem[(i+3)%18].name],answer:0,explanation:'Atomic number '+el.n+' is '+el.name+'. Atomic number equals the number of protons.'});
+    bank.push({topic:'Atomic structure',outcomes:['SC4-PRT-01'],type:'mcq',question:'As you move from '+o6elem[i].name+' (atomic number '+o6elem[i].n+') to '+(i+1<18?o6elem[i+1].name:'argon')+' (atomic number '+(i+1<18?o6elem[i+1].n:18)+'), what changes in the atomic structure?',choices:['one more proton and one more electron are added','the number of neutrons only increases','the number of shells doubles','the atomic structure stays the same'],answer:0,explanation:'Moving from one element to the next increases atomic number by 1, adding one proton and one electron.'});
+    bank.push({topic:'Atomic structure',outcomes:['SC4-PRT-01'],type:'mcq',question:'An element has electron arrangement '+el.config+'. Which element is it?',choices:[el.name,o6elem[(i+5)%18].name,o6elem[(i+8)%18].name,o6elem[(i+11)%18].name],answer:0,explanation:'Electron arrangement '+el.config+' means '+el.n+' electrons in '+el.shells+' shell'+(el.shells>1?'s':'')+', which is '+el.name+' (atomic number '+el.n+').'});
+    if(i%3===0) bank.push({topic:'Atomic structure',outcomes:['SC4-PRT-01'],type:'short',question:'Explain how the atomic structure of '+el.name+' differs from '+(i>0?o6elem[i-1].name:'the previous element')+' because of its higher atomic number. Give 1-2 sentences.',keywords:['atomic number','proton','electron','shell','increases'],minMatches:2,explanation:el.name[0].toUpperCase()+el.name.slice(1)+' has one more proton and one more electron than the previous element. Its electron arrangement is '+el.config+'.'});
+    if(i%6===0) bank.push({topic:'Atomic structure',outcomes:['SC4-PRT-01'],type:'long',question:'Explain how the atomic structure changes as atomic number increases from '+el.name+' through the next four elements. Write 4-5 sentences including changes in protons, electrons, shell filling and when a new period starts.',keywords:['atomic number','proton','electron','shell','period','increases','arrangement'],minMatches:4,explanation:'Each increase in atomic number adds one proton and one electron. Shells fill in order (maximum 2 in shell 1, 8 in shell 2, 8 in shell 3). A new period begins when a new shell is started.'});
+  });
+
+  // --- Outcome 8: Models of atomic structure over time ---
+  var o8=[
+    {sci:'Democritus',era:'ancient Greece (~400 BC)',contrib:'proposed matter is made of tiny indivisible particles called atomos',evidence:'philosophical reasoning — no experimental evidence',limit:'had no experimental proof; the idea was rejected for centuries',model:'philosophical atomism'},
+    {sci:'Dalton',era:'early 1800s',contrib:'described atoms as solid indivisible spheres that combine in fixed ratios',evidence:'law of conservation of mass and law of multiple proportions from gas experiments',limit:'could not explain why elements behave differently or where charge comes from',model:'solid sphere model'},
+    {sci:'Thomson',era:'1897',contrib:'discovered the electron and proposed the plum pudding model — electrons embedded in positive cloud',evidence:'cathode ray tube experiments showed negatively charged particles exist in atoms',limit:'assumed positive charge was spread out; did not predict a concentrated nucleus',model:'plum pudding model'},
+    {sci:'Rutherford',era:'1909-1911',contrib:'discovered the nucleus — a small, dense, positive centre to the atom',evidence:'gold foil experiment — most alpha particles passed through but some bounced back sharply',limit:'could not explain why electrons do not spiral into the positive nucleus',model:'nuclear model'},
+    {sci:'Bohr',era:'1913',contrib:'proposed electrons orbit the nucleus in fixed energy levels (shells)',evidence:'hydrogen emission spectrum showed only specific colours, meaning electrons have fixed energies',limit:'worked well only for hydrogen atoms; could not explain larger atoms accurately',model:'Bohr shell model'},
+    {sci:'Chadwick',era:'1932',contrib:'discovered the neutron — a neutral particle in the nucleus',evidence:'bombarding beryllium with alpha particles produced neutral radiation that knocked protons from wax',limit:'the internal structure of the nucleus itself was still not fully explained',model:'neutron discovery'}
+  ];
+  o8.forEach(function(d,i){
+    bank.push({topic:'History of atom',outcomes:['SC4-PRT-01'],type:'mcq',question:'Which scientist proposed the '+d.model+'?',choices:[d.sci,o8[(i+1)%6].sci,o8[(i+2)%6].sci,o8[(i+3)%6].sci],answer:0,explanation:d.sci+' proposed the '+d.model+' in the '+d.era+'. '+d.sci+' '+d.contrib+'.'});
+    bank.push({topic:'History of atom',outcomes:['SC4-PRT-01'],type:'mcq',question:'What evidence did '+d.sci+' use to support changes to the atomic model?',choices:[d.evidence,'the periodic table only','intuition and guessing','measuring atomic mass with a balance'],answer:0,explanation:d.sci+' used '+d.evidence+'.'});
+    bank.push({topic:'History of atom',outcomes:['SC4-PRT-01'],type:'mcq',question:'What was the main limitation of '+d.sci+'\'s '+d.model+'?',choices:[d.limit,'it was too complicated','it had too many particles','it correctly explained everything'],answer:0,explanation:'The main limitation of '+d.sci+'\'s model was: '+d.limit+'.'});
+    bank.push({topic:'History of atom',outcomes:['SC4-PRT-01'],type:'short',question:'Describe '+d.sci+'\'s contribution to the atomic model and the evidence that supported it. Give 1-2 sentences.',keywords:[d.sci.toLowerCase(),d.model.split(' ')[0].toLowerCase(),'evidence','model','proposed'],minMatches:2,explanation:d.sci+' '+d.contrib+'. Evidence: '+d.evidence+'.'});
+    if(i%2===0) bank.push({topic:'History of atom',outcomes:['SC4-PRT-01'],type:'long',question:'Explain how '+d.sci+'\'s discovery changed the atomic model and why the previous model was no longer adequate. Write 4-5 sentences including the evidence used and the limitation this discovery addressed.',keywords:[d.sci.toLowerCase(),'model','evidence','changed','limitation','atomic'],minMatches:4,explanation:d.sci+' '+d.contrib+'. Evidence: '+d.evidence+'. Previous limitation: o8[(i-1+6)%6].limit.'});
+  });
+  bank.push({topic:'History of atom',outcomes:['SC4-PRT-01'],type:'long',question:'Describe how the atomic model changed from Dalton to Thomson to Rutherford to Bohr. Write 4-5 sentences explaining what evidence caused each major change.',keywords:['Dalton','Thomson','Rutherford','Bohr','model','evidence','changed','electron','nucleus','shell'],minMatches:5,explanation:'Dalton described atoms as solid spheres. Thomson discovered electrons (cathode rays) and proposed the plum pudding model. Rutherford\'s gold foil experiment revealed the nucleus. Bohr used hydrogen spectra evidence to add electron shells.'});
+  bank.push({topic:'History of atom',outcomes:['SC4-PRT-01'],type:'short',question:'Why do scientific models of the atom change over time? Give 1-2 sentences.',keywords:['evidence','model','change','observation','technology','improve'],minMatches:2,explanation:'Scientific models change when new evidence or observations cannot be explained by the existing model. Better technology allows scientists to gather more detailed evidence.'});
+
+  // --- Outcome 9: Technology and atomic understanding ---
+  var o9=[
+    {tech:'cathode ray tube',sci:'Thomson',disc:'electron',how:'Electric and magnetic fields deflected cathode rays, showing they were negatively charged particles inside atoms.',impact:'This disproved Dalton\'s indivisible solid sphere model and led to the plum pudding model.'},
+    {tech:'gold foil experiment',sci:'Rutherford',disc:'atomic nucleus',how:'Alpha particles were fired at thin gold foil. Most passed through but some bounced back sharply, revealing a small dense positive nucleus.',impact:'This replaced the plum pudding model with the nuclear model of the atom.'},
+    {tech:'hydrogen emission spectroscopy',sci:'Bohr',disc:'electron energy levels (shells)',how:'Hydrogen gas excited by electricity produces only specific colours of light, showing electrons can only have certain fixed energies.',impact:'This led to the Bohr model of electrons in fixed shells around the nucleus.'},
+    {tech:'neutron bombardment of beryllium',sci:'Chadwick',disc:'neutron',how:'Alpha particles hitting beryllium produced neutral radiation that could knock protons from wax, revealing an uncharged nuclear particle.',impact:'This completed the basic model of the nucleus with protons and neutrons.'},
+    {tech:'electron microscope',sci:'various researchers',disc:'direct visualisation of atomic-scale structures',how:'Electrons have a much shorter wavelength than light, allowing structures too small for light microscopes to be imaged.',impact:'Scientists can now image individual atoms and molecules, confirming theoretical models.'},
+    {tech:'X-ray crystallography',sci:'Bragg',disc:'arrangement of atoms in crystals',how:'X-rays diffract off atomic planes in crystals; the resulting pattern reveals the spacing and arrangement of atoms.',impact:'This revealed the 3D structure of many important materials and molecules, including DNA.'},
+    {tech:'mass spectrometer',sci:'Aston',disc:'isotopes — atoms of the same element with different masses',how:'Atoms are ionised and deflected by magnetic fields; different masses follow different paths, revealing multiple mass values for the same element.',impact:'This showed that atoms of the same element can differ in mass due to different numbers of neutrons.'},
+    {tech:'particle accelerator',sci:'various researchers',disc:'sub-nuclear particles (quarks etc.)',how:'Protons and other particles are accelerated to near light speed and collided, and the fragments reveal smaller particles inside.',impact:'This showed that protons and neutrons are themselves made of smaller particles called quarks.'}
+  ];
+  o9.forEach(function(d,i){
+    bank.push({topic:'History of atom',outcomes:['SC4-PRT-01'],type:'mcq',question:'Which technology enabled '+d.sci+' to discover the '+d.disc+'?',choices:[d.tech,o9[(i+1)%8].tech,o9[(i+2)%8].tech,o9[(i+3)%8].tech],answer:0,explanation:d.sci+' used the '+d.tech+'. '+d.how});
+    bank.push({topic:'History of atom',outcomes:['SC4-PRT-01'],type:'mcq',question:'How did the '+d.tech+' help scientists understand atomic structure?',choices:[d.how,'it directly showed atoms using visible light','it weighed individual electrons','it had no impact on atomic theory'],answer:0,explanation:'The '+d.tech+' contributed by: '+d.how+' Impact: '+d.impact});
+    bank.push({topic:'History of atom',outcomes:['SC4-PRT-01'],type:'short',question:'Explain how the '+d.tech+' led to a new discovery about atomic structure. Give 1-2 sentences.',keywords:[d.tech.split(' ')[0].toLowerCase(),d.disc.split(' ')[0].toLowerCase(),'discovery','evidence','technology','model'],minMatches:2,explanation:'The '+d.tech+' was used by '+d.sci+' to discover the '+d.disc+'. '+d.how});
+    if(i%3===0) bank.push({topic:'History of atom',outcomes:['SC4-PRT-01'],type:'long',question:'Explain how new technology (specifically the '+d.tech+') allowed scientists to improve their understanding of atomic structure. Write 4-5 sentences describing what the technology does, what was discovered, and how this changed the atomic model.',keywords:[d.tech.split(' ')[0].toLowerCase(),'technology','discovery','evidence','model','atomic structure'],minMatches:3,explanation:'The '+d.tech+': '+d.how+' This led to the discovery of the '+d.disc+'. Impact: '+d.impact});
+  });
+
+  // --- Outcome 10: Periodic table patterns and reactivity ---
+  var o10=[
+    {pattern:'reactivity increases going DOWN group 1',example:'potassium reacts more vigorously with water than sodium, which reacts more than lithium',why:'atoms get larger going down the group, so the outer electron is further from the nucleus and more easily lost',kw:'group 1 reactivity increase down'},
+    {pattern:'reactivity DECREASES going down group 17 (halogens)',example:'fluorine is more reactive than chlorine, which is more reactive than bromine and iodine',why:'smaller atoms at the top of group 17 attract electrons more strongly, making them more reactive',kw:'halogen reactivity decrease group 17'},
+    {pattern:'noble gases (group 18) are unreactive',example:'helium, neon and argon do not form compounds under normal conditions',why:'their outer electron shells are completely full, so they have no tendency to gain or lose electrons',kw:'noble gas unreactive group 18 full shell'},
+    {pattern:'metals are on the LEFT of the periodic table',example:'sodium, potassium, calcium and iron are all metals found on the left',why:'elements on the left tend to have few outer electrons and lose them easily, which is a characteristic of metals',kw:'metals left periodic table'},
+    {pattern:'non-metals are on the RIGHT of the periodic table',example:'nitrogen, oxygen, fluorine, chlorine and neon are all on the right',why:'elements on the right gain or share electrons rather than losing them, characteristic of non-metals',kw:'non-metals right periodic table'},
+    {pattern:'elements in the same GROUP have similar chemical properties',example:'sodium and potassium both react with water to produce hydrogen gas and a metal hydroxide',why:'elements in a group have the same number of outer (valence) electrons, which determines chemical behaviour',kw:'group same properties valence electrons'},
+    {pattern:'period number equals number of electron shells',example:'period 3 elements (sodium to argon) all have 3 electron shells',why:'each new period begins when electrons start filling a new outer shell',kw:'period shells equal number'},
+    {pattern:'atomic number increases across each period',example:'period 2 goes from Li(3) to Ne(10), each adding one proton',why:'each element has one more proton than the element before it',kw:'atomic number increase across period'},
+    {pattern:'metalloids sit between metals and non-metals',example:'silicon and germanium are semiconductors on the boundary between metals and non-metals',why:'their intermediate electron structure gives them mixed properties',kw:'metalloid semiconductor boundary between'},
+    {pattern:'group 1 metals are the most reactive metals',example:'sodium reacts vigorously with water and potassium reacts explosively',why:'group 1 atoms have only one outer electron, which they lose very easily',kw:'group 1 alkali metals most reactive'},
+    {pattern:'the periodic table is arranged in order of increasing atomic number',example:'hydrogen is element 1, helium is 2, lithium is 3, and so on to oganesson at 118',why:'Mendeleev originally arranged by atomic mass, but the modern table uses atomic number (protons)',kw:'atomic number order periodic table'},
+    {pattern:'elements in the same group form similar compounds',example:'NaCl and KCl are both formed the same way because Na and K are both in group 1',why:'having the same number of outer electrons means elements in a group react similarly',kw:'group similar compounds react'},
+    {pattern:'melting points generally increase across period 3 for metals then decrease',example:'aluminium has a higher melting point than sodium, but sulfur and argon have much lower melting points',why:'metallic bonding strengthens across the metal elements; molecular and atomic substances have weaker forces',kw:'melting point trend period metals'},
+    {pattern:'transition metals are found in groups 3 to 12',example:'iron, copper, gold, silver and nickel are all transition metals',why:'they have electrons filling inner d-orbitals and often form coloured compounds and multiple ions',kw:'transition metals groups 3 12'},
+    {pattern:'atomic radius generally decreases across a period',example:'sodium atoms are larger than argon atoms despite both being in period 3',why:'more protons across a period pull electrons closer without adding new shells',kw:'atomic radius decrease across period proton'},
+    {pattern:'ionisation energy generally increases across a period',example:'sodium loses an electron more easily than chlorine',why:'more protons hold electrons more tightly across a period, requiring more energy to remove them',kw:'ionisation energy increase period proton'},
+    {pattern:'halogens all have 7 outer electrons',example:'fluorine (2,7), chlorine (2,8,7), bromine all have 7 outer electrons',why:'being in group 17 means all halogens have 7 valence electrons and want to gain one more',kw:'halogen 7 outer electrons group 17'},
+    {pattern:'elements in period 2 all have 2 electron shells',example:'lithium (2,1) through neon (2,8) all have exactly 2 shells',why:'period number equals the number of electron shells in the atom',kw:'period 2 two shells electrons'},
+    {pattern:'reactivity of non-metals increases going UP group 17',example:'fluorine at the top of group 17 is the most reactive non-metal on the periodic table',why:'smaller atoms attract electrons more strongly; fluorine has the strongest pull',kw:'non-metal reactivity increase up group 17 fluorine'},
+    {pattern:'group 2 metals react with water but less vigorously than group 1',example:'calcium reacts with cold water to produce bubbles, but sodium reacts much faster',why:'group 2 elements have 2 outer electrons and need to lose both, requiring more energy than group 1',kw:'group 2 calcium water less reactive group 1'}
+  ];
+  o10.forEach(function(d,i){
+    bank.push({topic:'Periodic table',outcomes:['SC4-PRT-01'],type:'mcq',question:'Which statement correctly describes a pattern in the periodic table?',choices:[d.pattern,o10[(i+7)%20].pattern,o10[(i+13)%20].pattern,o10[(i+17)%20].pattern],answer:0,explanation:'The pattern "'+d.pattern+'" is correct. This is because '+d.why+'.'});
+    bank.push({topic:'Periodic table',outcomes:['SC4-PRT-01'],type:'mcq',question:'A student observes that "'+d.example+'". Which periodic table pattern does this demonstrate?',choices:[d.pattern,'metals are always on the right','atomic number decreases down a group','all elements have the same reactivity'],answer:0,explanation:'This demonstrates the pattern: '+d.pattern+'. '+d.why+'.'});
+    bank.push({topic:'Periodic table',outcomes:['SC4-PRT-01'],type:'short',question:'Describe the following periodic table pattern and explain why it occurs: '+d.pattern+'. Give 1-2 sentences.',keywords:d.kw.split(' '),minMatches:2,explanation:'Pattern: '+d.pattern+'. This occurs because: '+d.why+'.'});
+    if(i%3===0) bank.push({topic:'Periodic table',outcomes:['SC4-PRT-01'],type:'long',question:'Explain the pattern "'+d.pattern+'" using an example and connect it to atomic structure. Write 4-5 sentences.',keywords:d.kw.split(' ').concat(['atomic','structure','explain','example']),minMatches:3,explanation:'Pattern: '+d.pattern+'. Example: '+d.example+'. This occurs because: '+d.why+'.'});
+  });
+
+  // --- Outcome 11: Predict properties from position ---
+  var o11=[
+    {name:'lithium',g:1,p:2,type:'reactive metal',preds:['has 1 outer electron','is a reactive metal','reacts with water to produce hydrogen','forms a +1 ion'],kw:'lithium group 1 reactive metal outer electron'},
+    {name:'sodium',g:1,p:3,type:'very reactive metal',preds:['has 3 electron shells','has 1 outer electron','reacts vigorously with water','forms a +1 ion (Na⁺)'],kw:'sodium group 1 period 3 reactive'},
+    {name:'potassium',g:1,p:4,type:'very reactive metal',preds:['is more reactive than sodium','has 4 electron shells','reacts explosively with water','forms a +1 ion'],kw:'potassium group 1 period 4 more reactive'},
+    {name:'magnesium',g:2,p:3,type:'metal',preds:['has 2 outer electrons','forms a +2 ion','reacts with acids to produce hydrogen','is less reactive than sodium'],kw:'magnesium group 2 two outer electrons'},
+    {name:'calcium',g:2,p:4,type:'reactive metal',preds:['has 2 outer electrons','reacts slowly with cold water','forms a +2 ion','is found in bones and limestone'],kw:'calcium group 2 reactive bone limestone'},
+    {name:'silicon',g:14,p:3,type:'metalloid',preds:['is a metalloid (semiconductor)','has 4 outer electrons','sits between metals and non-metals','is used in computer chips'],kw:'silicon metalloid semiconductor group 14'},
+    {name:'fluorine',g:17,p:2,type:'very reactive non-metal',preds:['is the most reactive halogen','has 7 outer electrons','gains 1 electron to form a −1 ion','is the most electronegative element'],kw:'fluorine most reactive halogen group 17'},
+    {name:'chlorine',g:17,p:3,type:'reactive non-metal',preds:['is a reactive halogen gas','has 7 outer electrons','gains electrons in reactions','is used for disinfection'],kw:'chlorine halogen group 17 reactive gas'},
+    {name:'bromine',g:17,p:4,type:'non-metal',preds:['is a halogen less reactive than chlorine','is a liquid at room temperature','has 7 outer electrons','forms a −1 ion'],kw:'bromine halogen group 17 liquid'},
+    {name:'helium',g:18,p:1,type:'noble gas',preds:['is a noble gas','does not react','has a full outer shell (2 electrons)','does not form compounds'],kw:'helium noble gas unreactive full shell'},
+    {name:'neon',g:18,p:2,type:'noble gas',preds:['is a noble gas','has a full outer shell of 8 electrons','is unreactive','glows when electricity passes through it'],kw:'neon noble gas unreactive full shell 8'},
+    {name:'argon',g:18,p:3,type:'noble gas',preds:['is an unreactive noble gas','has 8 outer electrons (full shell)','does not form compounds','is used as a shielding gas in welding'],kw:'argon noble gas unreactive group 18'},
+    {name:'aluminium',g:13,p:3,type:'metal',preds:['is a metal with 3 outer electrons','forms a +3 ion','is lightweight','is used in aircraft and cans'],kw:'aluminium metal group 13 three outer electrons'},
+    {name:'sulfur',g:16,p:3,type:'non-metal',preds:['is a non-metal','has 6 outer electrons','tends to gain 2 electrons','forms compounds with oxygen and hydrogen'],kw:'sulfur non-metal group 16 six outer electrons'},
+    {name:'phosphorus',g:15,p:3,type:'non-metal',preds:['is a non-metal','has 5 outer electrons','forms compounds with oxygen','is used in fertilisers'],kw:'phosphorus non-metal group 15 five outer electrons'},
+    {name:'copper',g:11,p:4,type:'transition metal',preds:['is a transition metal','has low reactivity','conducts electricity very well','forms +1 and +2 ions'],kw:'copper transition metal conducts electricity'},
+    {name:'gold',g:11,p:6,type:'very unreactive metal',preds:['is a very unreactive metal','does not corrode','conducts electricity','is used for jewellery and electronics'],kw:'gold unreactive metal does not corrode'},
+    {name:'iron',g:8,p:4,type:'transition metal',preds:['is a transition metal','is magnetic','forms +2 and +3 ions','is used to make steel'],kw:'iron transition metal magnetic steel'},
+    {name:'zinc',g:12,p:4,type:'metal',preds:['is a metal','forms a +2 ion','is less reactive than magnesium','is used to galvanise iron'],kw:'zinc metal galvanise group 12'},
+    {name:'beryllium',g:2,p:2,type:'metal',preds:['is a metal with 2 outer electrons','forms a +2 ion','is in period 2 with 2 electron shells','is harder than most group 2 metals'],kw:'beryllium group 2 period 2 two shells'}
+  ];
+  o11.forEach(function(d,i){
+    bank.push({topic:'Periodic table',outcomes:['SC4-PRT-01'],type:'mcq',question:'An element is in group '+d.g+' and period '+d.p+'. Which prediction is most likely correct?',choices:[d.preds[0],o11[(i+3)%o11.length].preds[0],o11[(i+7)%o11.length].preds[0],'it is always a noble gas'],answer:0,explanation:d.name[0].toUpperCase()+d.name.slice(1)+' is in group '+d.g+', period '+d.p+'. '+d.preds.join('; ')+'.'});
+    bank.push({topic:'Periodic table',outcomes:['SC4-PRT-01'],type:'mcq',question:'What type of element would you expect to find in group '+d.g+', period '+d.p+'?',choices:[d.type,'a noble gas (always)','a radioactive metal','a liquid at all temperatures'],answer:0,explanation:'Group '+d.g+', period '+d.p+' is '+d.name+', which is a '+d.type+'. '+d.preds[0]+'.'});
+    bank.push({topic:'Periodic table',outcomes:['SC4-PRT-01'],type:'short',question:'Predict two properties of the element in group '+d.g+', period '+d.p+' using patterns from the periodic table. Give 1-2 sentences.',keywords:d.kw.split(' '),minMatches:2,explanation:d.name[0].toUpperCase()+d.name.slice(1)+' (group '+d.g+', period '+d.p+'): '+d.preds.slice(0,2).join(' and ')+'.'});
+    if(i%3===0) bank.push({topic:'Periodic table',outcomes:['SC4-PRT-01'],type:'long',question:'Predict the properties of the element in group '+d.g+', period '+d.p+' using your knowledge of the periodic table. Write 4-5 sentences covering its type, outer electrons, likely reactivity, and one real-world use.',keywords:d.kw.split(' ').concat(['predict','group','period','outer electrons','reactivity','use']),minMatches:3,explanation:d.name[0].toUpperCase()+d.name.slice(1)+' (group '+d.g+', period '+d.p+', '+d.type+'): '+d.preds.join('; ')+'.'});
+  });
+
+  // --- Outcome 12: Element symbols ---
+  var o12=[
+    {name:'hydrogen',sym:'H',n:1},{name:'helium',sym:'He',n:2},{name:'lithium',sym:'Li',n:3},
+    {name:'beryllium',sym:'Be',n:4},{name:'boron',sym:'B',n:5},{name:'carbon',sym:'C',n:6},
+    {name:'nitrogen',sym:'N',n:7},{name:'oxygen',sym:'O',n:8},{name:'fluorine',sym:'F',n:9},
+    {name:'neon',sym:'Ne',n:10},{name:'sodium',sym:'Na',n:11},{name:'magnesium',sym:'Mg',n:12},
+    {name:'aluminium',sym:'Al',n:13},{name:'silicon',sym:'Si',n:14},{name:'phosphorus',sym:'P',n:15},
+    {name:'sulfur',sym:'S',n:16},{name:'chlorine',sym:'Cl',n:17},{name:'argon',sym:'Ar',n:18},
+    {name:'potassium',sym:'K',n:19},{name:'calcium',sym:'Ca',n:20},{name:'scandium',sym:'Sc',n:21},
+    {name:'titanium',sym:'Ti',n:22},{name:'vanadium',sym:'V',n:23},{name:'chromium',sym:'Cr',n:24},
+    {name:'manganese',sym:'Mn',n:25},{name:'iron',sym:'Fe',n:26},{name:'cobalt',sym:'Co',n:27},
+    {name:'nickel',sym:'Ni',n:28},{name:'copper',sym:'Cu',n:29},{name:'zinc',sym:'Zn',n:30},
+    {name:'bromine',sym:'Br',n:35},{name:'krypton',sym:'Kr',n:36},{name:'silver',sym:'Ag',n:47},
+    {name:'tin',sym:'Sn',n:50},{name:'iodine',sym:'I',n:53},{name:'caesium',sym:'Cs',n:55},
+    {name:'barium',sym:'Ba',n:56},{name:'gold',sym:'Au',n:79},{name:'mercury',sym:'Hg',n:80},
+    {name:'lead',sym:'Pb',n:82},{name:'uranium',sym:'U',n:92},{name:'platinum',sym:'Pt',n:78},
+    {name:'tungsten',sym:'W',n:74},{name:'xenon',sym:'Xe',n:54}
+  ];
+  o12.forEach(function(d,i){
+    var wrong1=o12[(i+1)%o12.length];
+    var wrong2=o12[(i+4)%o12.length];
+    var wrong3=o12[(i+9)%o12.length];
+    bank.push({topic:'Element symbols',outcomes:['SC4-PRT-01'],type:'mcq',question:'What is the chemical symbol for '+d.name+'?',choices:[d.sym,wrong1.sym,wrong2.sym,wrong3.sym],answer:0,explanation:'The chemical symbol for '+d.name+' is '+d.sym+' (atomic number '+d.n+').'});
+    bank.push({topic:'Element symbols',outcomes:['SC4-PRT-01'],type:'mcq',question:'Which element has the symbol '+d.sym+'?',choices:[d.name,wrong1.name,wrong2.name,wrong3.name],answer:0,explanation:d.sym+' is the chemical symbol for '+d.name+' (atomic number '+d.n+').'});
+    bank.push({topic:'Element symbols',outcomes:['SC4-PRT-01'],type:'mcq',question:'A student sees the symbol '+d.sym+' on the periodic table. Which element number (atomic number) does it represent?',choices:[String(d.n),String(wrong1.n),String(wrong2.n),String(wrong3.n)],answer:0,explanation:d.sym+' is '+d.name+', which has atomic number '+d.n+'.'});
+  });
+
+  // --- Outcome 14: Tests to identify metals and non-metals ---
+  var o14=[
+    {test:'electrical conductivity test',what:'connect a sample in a simple circuit with a battery, wire and light bulb',metals:'the bulb lights up — metals conduct electricity',nonmetals:'the bulb stays dark — non-metals do not conduct (except graphite)',safety:'ensure low voltage is used; never touch bare wires',purpose:'determine whether a sample conducts electricity'},
+    {test:'malleability (hammer) test',what:'place the sample on an anvil and strike it with a hammer',metals:'flattens or deforms without breaking — metals are malleable',nonmetals:'shatters, crumbles or cracks — non-metals are brittle',safety:'wear eye protection; secure the anvil',purpose:'determine whether a sample is malleable'},
+    {test:'lustre (reflectivity) test',what:'use sandpaper to expose a fresh surface, then observe under light',metals:'shiny and reflective — metals have lustre',nonmetals:'dull, non-reflective surface — non-metals lack lustre',safety:'take care with sharp edges when cutting samples',purpose:'observe whether the surface is shiny (lustrous)'},
+    {test:'scratch hardness test',what:'try to scratch the surface with a coin, fingernail or known material',metals:'moderately hard, resists scratching by soft materials',nonmetals:'often soft (e.g., graphite) or vary widely in hardness',safety:'take care not to scratch skin when pressing the coin',purpose:'compare the hardness of a sample'},
+    {test:'dilute acid reaction test',what:'add a few drops of dilute hydrochloric acid to the sample in a test tube',metals:'bubbles form — hydrogen gas is produced as the metal reacts',nonmetals:'little or no observable reaction in most cases',safety:'wear safety goggles; acid is corrosive; work in ventilated area',purpose:'observe whether the sample reacts with dilute acid'},
+    {test:'water reaction test',what:'place a small piece in a beaker of water and observe',metals:'reactive metals (sodium, potassium) react vigorously; others show little reaction',nonmetals:'most non-metals show no visible reaction',safety:'use very small amounts of alkali metals; keep away from flames',purpose:'observe whether the sample reacts with water'},
+    {test:'magnet test',what:'hold a strong magnet near the sample and observe attraction',metals:'iron, nickel and cobalt are attracted; most other metals are not',nonmetals:'not attracted to the magnet',safety:'keep magnets away from electronic devices',purpose:'determine whether the sample is magnetic'},
+    {test:'density measurement',what:'measure mass using a balance and volume by water displacement; calculate density = mass ÷ volume',metals:'generally higher density than non-metals',nonmetals:'usually lower density than metals',safety:'take care with sharp-edged samples when measuring volume',purpose:'calculate and compare densities of samples'},
+    {test:'melting point test',what:'heat the sample carefully using a Bunsen burner and record the temperature when it melts',metals:'most metals melt at very high temperatures (e.g., iron 1538°C)',nonmetals:'often melt at much lower temperatures (e.g., sulfur 115°C)',safety:'use heat-proof gloves and mat; keep flammable materials away',purpose:'compare melting points as a property of metals vs non-metals'},
+    {test:'thermal conductivity test',what:'clamp the sample horizontally, heat one end with a flame, and time how long heat takes to travel along it',metals:'heat travels quickly; far end becomes hot rapidly',nonmetals:'heat travels slowly or barely at all',safety:'use heat-proof tongs; allow the sample to cool before handling',purpose:'test how quickly heat transfers through the sample'},
+    {test:'reaction with oxygen test',what:'hold the sample in tongs and place it in a Bunsen flame; observe the colour of any flame and products formed',metals:'burn with bright white or coloured flames; form solid metal oxide',nonmetals:'some burn with coloured flames producing gases; noble gases do not react',safety:'wear goggles; use small samples; do not breathe in products',purpose:'observe how the sample reacts when heated in the presence of oxygen'},
+    {test:'state at room temperature observation',what:'observe the sample at room temperature without any heating or cooling',metals:'nearly all metals are solid at room temperature',nonmetals:'can be solid (sulfur), liquid (bromine) or gas (chlorine, nitrogen)',safety:'some non-metals like bromine are toxic; use a sealed container',purpose:'classify the sample by its physical state under normal conditions'}
+  ];
+  o14.forEach(function(d,i){
+    bank.push({topic:'Metal tests',outcomes:['SC5-WS-01','SC4-WS-04','SC4-PRT-01'],type:'mcq',question:'What is the purpose of the '+d.test+'?',choices:['To '+d.purpose,'To measure atomic mass','To find the atomic number','To observe colour only'],answer:0,explanation:'The '+d.test+' is used to '+d.purpose+'. Method: '+d.what+'.'});
+    bank.push({topic:'Metal tests',outcomes:['SC5-WS-01','SC4-WS-04','SC4-PRT-01'],type:'mcq',question:'A student conducts a '+d.test+' on an unknown sample and gets the result: '+d.metals+'. What does this tell them?',choices:['The sample is likely a metal','The sample is definitely a non-metal','The result is always incorrect','The sample has no electrons'],answer:0,explanation:'The result "'+d.metals+'" in a '+d.test+' indicates the sample has metallic properties. '+d.nonmetals});
+    bank.push({topic:'Metal tests',outcomes:['SC5-WS-01','SC4-WS-04','SC4-PRT-01'],type:'mcq',question:'How would a student safely carry out the '+d.test+'?',choices:[d.what,'heat the sample to 1000°C without protection','use no equipment — just observe with eyes only','dissolve in water and measure pH'],answer:0,explanation:'Method for '+d.test+': '+d.what+'. Safety: '+d.safety+'.'});
+    bank.push({topic:'Metal tests',outcomes:['SC5-WS-01','SC4-WS-04','SC4-PRT-01'],type:'short',question:'Describe how a student would conduct the '+d.test+' and what result would indicate a metal. Give 1-2 sentences.',keywords:[d.test.split(' ')[0].toLowerCase(),'metal','result','test','observe','conduct'],minMatches:2,explanation:'The '+d.test+': '+d.what+'. Metal result: '+d.metals+'.'});
+    if(i%3===0) bank.push({topic:'Metal tests',outcomes:['SC5-WS-01','SC4-WS-04','SC4-PRT-01'],type:'long',question:'A student is given four unknown solids and uses the '+d.test+' to determine which are metals and which are non-metals. Write 4-5 sentences explaining the method, expected results for metals and non-metals, one safety precaution, and how the student would use the results to classify each sample.',keywords:[d.test.split(' ')[0].toLowerCase(),'metal','non-metal','result','safety','classify','method','observe'],minMatches:4,explanation:'Method: '+d.what+'. Metals: '+d.metals+'. Non-metals: '+d.nonmetals+'. Safety: '+d.safety+'.'});
   });
 
   return bank;
@@ -1138,14 +1499,6 @@ function expandQuestionBankToTarget(targetSize){
     var desiredType = counts.mcq < targetMcq ? 'mcq' : (exactCounts.long < targetLong ? 'long' : (exactCounts.short < targetShort ? 'short' : null));
     var item = makeBankExpansionQuestionOfType(serial, desiredType);
     var key = questionKey(item);
-    if(existing[key]){
-      if(/\?$/.test(item.question)){
-        item.question = item.question.replace(/\?$/, ' (variant '+serial+')?');
-      } else {
-        item.question += ' (variant '+serial+')';
-      }
-      key = questionKey(item);
-    }
     if(!existing[key]){
       questionBank.push(item);
       existing[key] = true;

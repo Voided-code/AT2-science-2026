@@ -147,8 +147,9 @@ async function markWithGroq(payload){
     'Expected guidance/model answer: ' + (payload.guidance || ''),
     'Keywords: ' + ((payload.keywords || []).join(', ') || '-'),
     'Student answer: ' + (payload.answer || ''),
-    'Mark out of ' + maxMark + '. Award partial marks. Do not give full marks for one-word or vague answers.',
-    'Score is 1 only if the answer earns at least 60% of the marks.',
+    'Mark out of ' + maxMark + '. Award marks generously for correct science ideas even if wording differs from the model answer. Paraphrased answers that show understanding should receive full credit.',
+    'Only deduct marks if a key idea is missing or scientifically wrong. One-word answers with no explanation cannot earn full marks.',
+    'Score is 1 if the answer earns at least 60% of the marks.',
     feedbackGuide,
     'Return only JSON exactly like {"score":0,"mark":1,"maxMark":' + maxMark + ',"explanation":"feedback"}'
   ].join('\n\n');
