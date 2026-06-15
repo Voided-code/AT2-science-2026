@@ -306,6 +306,7 @@ function serveStatic(req, res){
     const type = ext === '.html' ? 'text/html; charset=utf-8'
       : ext === '.css' ? 'text/css; charset=utf-8'
       : ext === '.js' ? 'text/javascript; charset=utf-8'
+      : ext === '.svg' ? 'image/svg+xml'
       : 'application/octet-stream';
     res.writeHead(200, {'Content-Type': type});
     res.end(data);
