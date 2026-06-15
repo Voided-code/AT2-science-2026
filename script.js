@@ -1487,7 +1487,7 @@ function expandQuestionBankToTarget(targetSize){
   var existing = {};
   questionBank.forEach(function(item){ existing[questionKey(item)] = true; });
   var targetMcq = Math.round(targetSize / 4);
-  var targetShort = Math.round((targetSize - targetMcq) * 0.5);
+  var targetShort = Math.round((targetSize - targetMcq) * 0.75);
   var targetLong = targetSize - targetMcq - targetShort;
   var serial = 1;
   while(questionBank.length < targetSize && serial < targetSize * 5){
@@ -3104,7 +3104,7 @@ async function refreshAiAvailabilityOnStartup(){
 }
 
 window.addEventListener('DOMContentLoaded', async function(){
-  expandQuestionBankToTarget(1000);
+  expandQuestionBankToTarget(500);
   setupDebugMenu();
   startQuiz();
   setupPeriodicToggle();

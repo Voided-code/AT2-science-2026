@@ -539,7 +539,7 @@ var matter=[
   }
 
   function rebalanceAndTopUpBank(){
-    var targets = {mcq:250, short:375, long:375};
+    var targets = {mcq:125, short:281, long:94};
     var used = {};
     var balanced = [];
 
